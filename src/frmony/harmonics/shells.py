@@ -119,7 +119,7 @@ def sample_shells(
 def band_radii(
     size: int,
     lowest: float = 0.125,
-    highest: float = 0.40,
+    highest: float = 0.49,
     spacing: float = 1.0,
 ) -> NDArray[np.float64]:
     """Radii of the spheres to expand on, in voxels.
@@ -135,9 +135,14 @@ def band_radii(
     eighth of the box turned a median error of three degrees into eight,
     and sent four pairs in ten past thirty degrees.
 
-    The highest frequencies are thrown away for the opposite reason: past
-    the inscribed sphere of the box the samples run into its corners, where
-    there is no data, and interpolation there is guesswork.
+    The outermost sphere is the last that fits inside the box. Past it the
+    samples run into the corners, where a sphere is no longer whole. It
+    used to stop well short of that, at four tenths of the box, on top of
+    the crop the loader had already made, so the search ended at a third
+    of the sampling rate while being told four tenths. Those spheres are
+    data. On EMPIAR-10304, taking them in raised the pairs whose best
+    rotation was within fifteen degrees of a refinement from 33 in a
+    hundred to 42, and to 49 with no crop at all.
 
     Args:
         size: Extent of the volume along each axis.

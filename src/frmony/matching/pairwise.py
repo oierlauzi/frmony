@@ -54,6 +54,16 @@ class Settings:
     """Largest shift considered, in voxels of the working volume."""
     epsilon: float = 1e-12
     """Guards the divisions where two particles overlap in nothing."""
+    phases: bool = False
+    """Whether the expansions kept the phases. If they did, the first
+    stage is the constrained correlation itself and its best rotation is
+    taken as it stands; the second stage then only finds the shift.
+
+    The second stage used to choose among the candidates whatever the
+    first had ranked them by. That is right for amplitudes, which it
+    outranks. With phases it is the poorer judge: it turns the second
+    particle by interpolating its spectrum, and on EMPIAR-10304 letting
+    it choose took the pairs aligned from 40 in a hundred to 29."""
 
     def __post_init__(self) -> None:
         if self.bandwidth < 2:
@@ -155,6 +165,7 @@ def align_pair(
     left: Expansion,
     right: Expansion,
     settings: Settings,
+    band: ArrayLike | None = None,
 ) -> Alignment:
     """Align the second particle onto the first.
 
@@ -166,6 +177,15 @@ def align_pair(
         left: The expansion of the first, from `expand_particle`.
         right: The expansion of the second.
         settings: What to search.
+        band: One over the frequencies the rotations were searched on,
+            the shape of a spectrum, and nothing elsewhere. The shifts
+            are then searched over the same frequencies. Left out, they
+            are searched over every frequency, the lowest among them,
+            which carry a particle's mass and not its orientation: the
+            rotational search has always dropped those, and a shift
+            stage that keeps them is led by them. On EMPIAR-10304 it
+            turned 49 pairs in a hundred aligned by the first stage
+            into 22.
 
     Returns:
         The best rotation, shift and score found.
@@ -176,6 +196,11 @@ def align_pair(
     mask = _shift_mask(size, settings.max_shift)
 
     matrices, _ = candidate_rotations(left, right, settings)
+    if settings.phases:
+        matrices = matrices[:1]
+    if band is not None:
+        left_weight = to_device(left_weight) * to_device(band)
+        right_weight = to_device(right_weight) * to_device(band)
 
     def score_one(rotation: jax.Array) -> tuple[jax.Array, jax.Array]:
         values, _ = shift_correlation(
@@ -212,6 +237,7 @@ def align_pairs(
     right: ArrayLike,
     settings: Settings,
     batch: int = 8,
+    band: ArrayLike | None = None,
 ) -> Alignment:
     """Align many pairs, a batch at a time.
 
@@ -225,6 +251,8 @@ def align_pairs(
         batch: How many pairs to align at once. Larger is faster until the
             device runs out of room; the cost is one correlation grid and
             one working volume per pair in flight.
+        band: The frequencies the shifts are searched over; see
+            `align_pair`.
 
     Returns:
         An `Alignment` whose fields are batched over the pairs.
@@ -235,6 +263,8 @@ def align_pairs(
     # be on the device already; a NumPy leaf would be asked to turn a
     # tracer into an array.
     batched = jax.tree.map(to_device, expansions)
+    if band is not None:
+        band = to_device(band)
     first_index = jnp.asarray(left)
     second_index = jnp.asarray(right)
 
@@ -248,6 +278,7 @@ def align_pairs(
             jax.tree.map(lambda leaf: leaf[first], batched),
             jax.tree.map(lambda leaf: leaf[second], batched),
             settings,
+            band,
         )
 
     pairs = jnp.stack((first_index, second_index), axis=1)

@@ -17,6 +17,7 @@ import time
 from dataclasses import dataclass, field
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 from numpy.typing import NDArray
 
@@ -168,8 +169,9 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
         )
     _LOGGER.info('Aligning %d pairs of %d particles.', len(left), count)
 
+    radii = band_radii(subtomograms.band, lowest=design.lowest)
     basis = make_basis(
-        band_radii(subtomograms.band, lowest=design.lowest),
+        radii,
         design.bandwidth,
         subtomograms.band,
         sampling_bandwidth=2 * design.bandwidth,
@@ -209,7 +211,20 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
         bandwidth=design.bandwidth,
         candidates=design.candidates,
         max_shift=design.max_shift,
+        phases=design.phases,
     )
+    # The shifts are searched over the spheres the rotations were. Built
+    # on the device: it is the shape of one particle, and a copy of that
+    # shape is how a particle crossing on its own would look.
+    offsets = jnp.arange(subtomograms.band) - subtomograms.band // 2
+    distance = jnp.sqrt(
+        offsets[:, None, None] ** 2
+        + offsets[None, :, None] ** 2
+        + offsets[None, None, :] ** 2
+    )
+    in_band = (
+        (distance >= float(radii[0])) & (distance <= float(radii[-1]) + 0.5)
+    ).astype(jnp.float32)
     started = time.perf_counter()
     aligned = align_pairs(
         data,
@@ -219,6 +234,7 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
         right,
         settings,
         batch=design.batch,
+        band=in_band,
     )
     elapsed = time.perf_counter() - started
     _LOGGER.info(
