@@ -39,12 +39,11 @@ the same files, and the version is detected rather than asked for.
 
 ```bash
 frmony run Extract/job006/particles.star run1/ --partners 150 \
-    --phases --mask-radius 16 --max-shift 4.5 --passes 3 --root . --verbose
+    --mask-radius 16 --max-shift 4.5 --passes 3 --root . --verbose
 ```
 
-`--phases` and `--mask-radius` are what real subtomograms have needed. The
-first keeps the phases in the rotational search. The second is the radius
-of a soft mask in voxels of the box, a little wider than the particle.
+`--mask-radius` is the radius of a soft mask in voxels of the box, a
+little wider than the particle. Real subtomograms have needed it.
 
 `--max-shift` is how far apart the centres of two particles may be, in
 voxels of the analysis band. Rotations and shifts are searched together
@@ -90,7 +89,7 @@ together.
 Each subtomogram is expanded in spherical harmonics on spheres of its
 Fourier transform. One inverse FFT then gives the correlation of two of
 them at every rotation of a grid at once. This is Kovacs and Wriggers
-(2002). With `--phases` the correlation is the full one, phases included,
+(2002). The correlation is the full one, phases included,
 which is what real subtomograms need. It is then only right at the shift
 the pair is actually at.
 
@@ -106,7 +105,7 @@ of Kovacs et al. (2003), which `frmony.matching.frm5d` implements and
 which it was measured against. They align the same pairs. This one takes
 a thousandth of the time.
 
-Without `--phases` the rotation is searched on amplitudes, which do not
+With `--no-phases` the rotation is searched on amplitudes, which do not
 move when the particle does, and the best few are then scored in full.
 That is enough for clean volumes and not for subtomograms.
 
@@ -172,8 +171,8 @@ three times it breaks down, at forty-three.
 
 **On real data, one dataset, picked twice.** EMPIAR-10304, ribosomes as
 RELION 5 pseudo-subtomograms of 48 voxels at 12.6 A, compared with the
-orientations of a RELION refinement. All with `--phases
---mask-radius 16` and 150 partners.
+orientations of a RELION refinement. All with `--mask-radius 16` and 150
+partners.
 
 The first picking is 10357 particles extracted at refined centres. With
 `--max-shift 1`, the orientations came out with a median error of 5.2
@@ -189,7 +188,7 @@ in a hundred.
 
 That is one dataset, of a large particle, at one binning.
 
-**Without `--phases` it does not work on that data.** The rotational
+**With `--no-phases` it does not work on that data.** The rotational
 search on amplitudes aligned three pairs in a thousand, which is what
 chance gives. Amplitudes do know something once each voxel is
 standardized over the particles, which this package does not yet do, but

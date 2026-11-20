@@ -40,12 +40,13 @@ The first run on real data, EMPIAR-10304.
 - A mask is carried with the particles and applied at the centre each is
   believed to have. `load_subtomograms` no longer applies it.
 - `--max-shift` is how far apart two particles' centres may be, and with
-  `--phases` it is how far rotations and shifts are searched together.
+  phases it is how far rotations and shifts are searched together.
 
 ### Added
 
-- `Design.phases` and `--phases`, which keep the phases in the rotational
-  search. Real subtomograms needed it.
+- `Design.phases` and `--phases`, on by default, which keep the phases in
+  the rotational search. Real subtomograms needed it. `--no-phases` goes
+  back to amplitudes.
 - Rotations and shifts searched at once, over a lattice of trial shifts,
   for particles that are off centre: `matching.Joint`.
 - `Design.passes` and `--passes`, which bring the particles back to the

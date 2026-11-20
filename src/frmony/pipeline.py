@@ -103,10 +103,14 @@ class Design:
     is not, so the later passes align more of them: on EMPIAR-10304,
     with particles thirty angstroms off, 59 in a hundred came out within
     fifteen degrees after one pass and 73 after three."""
-    phases: bool = False
-    """Keep the phases in the first, rotational stage. It then needs the
-    particles roughly centred, and finds rotations that the amplitudes
-    are too noisy to; see `frmony.matching.expand_particle`."""
+    phases: bool = True
+    """Keep the phases in the first, rotational stage. They find rotations
+    that the amplitudes are too noisy to: on EMPIAR-10304 the amplitudes
+    aligned three pairs in a thousand, which is chance. The price is that
+    a phased score only sees a pair at the shift it is at, which is why
+    rotations and shifts are then searched together; see `max_shift`.
+    Turn it off only for clean volumes, where amplitudes are enough and
+    need no shift searched."""
     detect: bool = True
     """Report the symmetry the measurements suggest, whatever was asked
     for."""

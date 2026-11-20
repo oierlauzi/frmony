@@ -188,11 +188,12 @@ def _add_run(commands: Any, shared: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         '--phases',
-        action='store_true',
-        help='Keep the phases in the rotational search. It then needs the '
-        'particles roughly centred, to about a voxel of the analysis '
-        'band, and finds rotations that the amplitudes alone are too '
-        'noisy to. Real subtomograms have needed it.',
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help='Keep the phases in the rotational search (default: on). '
+        'Real subtomograms need it: on amplitudes alone they align by '
+        'chance. --no-phases searches rotations on amplitudes, which '
+        'is enough for clean volumes.',
     )
     parser.add_argument(
         '--refine',
