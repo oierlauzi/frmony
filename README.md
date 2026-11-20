@@ -15,9 +15,8 @@ needs a starting reference, and it tends to find whatever it was given.
 `frmony` works the other way round. It aligns subtomograms to each other in
 pairs. Each pair gives one noisy relative orientation and shift. It then
 looks for the single set of orientations that fits all of those
-measurements at once. Orthogonal group synchronization gives the rotations.
-Linear least squares gives the centres. Nothing is ever compared against a
-reference, so no reference can bias the result.
+measurements at once. Nothing is ever compared against a reference, so no
+reference can bias the result.
 
 > `frmony` is young. Its API may change between minor releases until 1.0.
 
