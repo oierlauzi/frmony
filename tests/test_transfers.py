@@ -120,8 +120,18 @@ def _one_run(rng: np.random.Generator, count: int, box: int, kind: str) -> list:
         pixel_size=4.0,
         box=box,
     )
+    # A batch that takes every pair at once. With fewer at a time the
+    # pairs go through a scan, which is compiled afresh on each run and
+    # uploads its tables when it is: the copy of a traced constant, once
+    # a run, that the module docstring says to expect. What is pinned
+    # here is that nothing else crosses.
     design = Design(
-        partners=3, bandwidth=8, candidates=4, max_shift=2.0, detect=False
+        partners=3,
+        bandwidth=8,
+        candidates=4,
+        max_shift=2.0,
+        detect=False,
+        batch=32,
     )
     run(subtomograms, design)
     with record_transfers(kind, smallest=512) as log:

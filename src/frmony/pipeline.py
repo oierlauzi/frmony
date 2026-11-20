@@ -12,6 +12,7 @@ reference to be biased by.
 
 from __future__ import annotations
 
+import functools
 import logging
 import time
 from dataclasses import dataclass, field
@@ -25,8 +26,8 @@ from ._transfers import to_device, to_host
 from .averaging import average, fourier_shell_correlation, resolution_at
 from .graph import bridges, build_pairs, is_connected
 from .harmonics.shells import band_radii
-from .harmonics.transform import make_basis
-from .matching.correlation import expand_particle
+from .harmonics.transform import Basis, make_basis
+from .matching.correlation import Expansion, expand_particle
 from .matching.pairwise import (
     Joint,
     Settings,
@@ -79,18 +80,19 @@ class Design:
     symmetry. None keeps every pair."""
     seed: int = 0
     """Which pairs get chosen."""
-    batch: int = 32
+    batch: int = 8
     """Pairs aligned at once, and particles expanded at once.
 
-    This is the number to turn down when a device runs out of memory, and
-    the number to turn up when it is idle. The working set of a batch is
-    about
+    Measured on a 32 GB device, with particles in a band of 38 and the
+    rotations and shifts searched together: 1.6 milliseconds a pair at
+    two, 1.4 at four and at eight, 2.4 at sixteen, 3.7 at thirty-two and
+    4.4 at a hundred and twenty-eight, compilation included. More at
+    once is slower, not faster: each pair in flight holds its own grids
+    of every trial shift, and past eight they no longer fit where the
+    device works fastest. It was thirty-two, reasoned from a device
+    waiting on dispatch and not measured.
 
-        batch * candidates * band**3 * 8 bytes
-
-    times a small constant for the temporaries, so a batch of 32 with ten
-    candidates on a band of 52 is around three gigabytes. Four, which this
-    used to be, will leave a GPU waiting on dispatch."""
+    Turn it down if a device runs out of memory."""
     refine: bool = False
     """Polish each pair against the score itself after the grid search.
     Off by default; `frmony.matching.refine` says why."""
@@ -159,6 +161,30 @@ class Result:
     """The point group the triangle residuals suggest."""
     scores_by_symmetry: dict[str, float] = field(default_factory=dict)
     """How much of those residuals each candidate group explains."""
+
+
+@functools.partial(jax.jit, static_argnames=('phases', 'batch'))
+def _expand_stretch(
+    data: jax.Array,
+    measured: jax.Array,
+    basis: Basis,
+    phases: bool,
+    batch: int,
+) -> Expansion:
+    """The expansions of a stretch of the particles.
+
+    The basis is an argument and not something closed over. Closed over,
+    its tables are folded into the compiled program and uploaded again
+    each time one is built, by the runtime and under no name.
+    """
+    expanded: Expansion = jax.lax.map(
+        lambda particle: expand_particle(
+            particle[0], particle[1], basis, phases
+        ),
+        (data, measured),
+        batch_size=batch,
+    )
+    return expanded
 
 
 def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
@@ -245,13 +271,40 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
         # correctly on EMPIAR-10304 from eighteen in a hundred to five. The
         # average below does use the weight, as it must to undo the transfer.
         measured = (weight > 0.0).astype(weight.dtype)
-        expansions = jax.lax.map(
-            lambda particle: expand_particle(
-                particle[0], particle[1], basis, design.phases
-            ),
-            (data, measured),
-            batch_size=max(design.batch, 1),
-        )
+        # The weight itself is only wanted again for the average. Holding
+        # it here through the alignment is a quarter of what the
+        # particles take, for nothing.
+        del weight
+        # A stretch of the particles at a time. One map over all of
+        # them holds every expansion twice while it puts them together,
+        # which is the largest thing on the device.
+        reach_at_once = max(design.batch, 1) * 32
+        pieces = [
+            _expand_stretch(
+                data[start : start + reach_at_once],
+                measured[start : start + reach_at_once],
+                basis,
+                design.phases,
+                max(design.batch, 1),
+            )
+            for start in range(0, count, reach_at_once)
+        ]
+        # Put together one leaf at a time, letting go of its pieces
+        # before the next, so that only a third is ever held twice.
+        layout = jax.tree.structure(pieces[0])
+        scattered = [
+            list(parts)
+            for parts in zip(
+                *(jax.tree.leaves(piece) for piece in pieces), strict=True
+            )
+        ]
+        del pieces
+        joined = []
+        for parts in scattered:
+            joined.append(jnp.concatenate(parts))
+            parts.clear()
+        expansions = jax.tree.unflatten(layout, joined)
+        del joined
         # The timing above means nothing without this: JAX dispatches
         # asynchronously, so the loop returns before the work is done.
         jax.tree.map(lambda leaf: leaf.block_until_ready(), expansions)
@@ -398,6 +451,9 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
             # again: a pair whose particles are centred is a pair the
             # rotational search can see.
             applied = applied + centres
+            # Let go of this pass before the next is built. Held over,
+            # the particles and their expansions are on the device twice.
+            del data, measured, expansions, aligned
             _LOGGER.info(
                 'Pass %d moved the centres by a median of %.2f voxels of the '
                 'band.',
@@ -405,6 +461,7 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
                 float(np.median(np.linalg.norm(centres, axis=1))),
             )
 
+    weight = to_device(subtomograms.weight)
     structure, support = average(data, weight, orientations, centres)
     halves = []
     for half in (np.arange(count) % 2 == 0, np.arange(count) % 2 == 1):

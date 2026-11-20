@@ -14,6 +14,7 @@ smaller again.
 
 from __future__ import annotations
 
+import functools
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,7 +24,7 @@ import jax.numpy as jnp
 import numpy as np
 from numpy.typing import NDArray
 
-from ._transfers import to_device
+from ._transfers import to_device, to_host
 from .io.volumes import prepare, soft_ball
 from .io.wedge import cone_weight, relion_weight, wedge_weight
 
@@ -279,6 +280,48 @@ def load_subtomograms(
     )
 
 
+@functools.partial(jax.jit, static_argnames=('masked', 'batch'))
+def _recentre_stretch(
+    data: jax.Array,
+    weight: jax.Array,
+    moves: jax.Array,
+    mask: jax.Array,
+    masked: bool,
+    batch: int,
+) -> jax.Array:
+    """A stretch of the particles moved back, masked and whitened."""
+    size = data.shape[-1]
+    axis = (jnp.arange(size) - size // 2) / size
+    middle = size // 2
+
+    def one(inputs: tuple[jax.Array, jax.Array, jax.Array]) -> jax.Array:
+        spectrum, amplitude, move = inputs
+        # exp(+2 pi i k . c) moves a volume back by c.
+        ramp = jnp.exp(
+            2j
+            * jnp.pi
+            * (
+                axis[:, None, None] * move[2]
+                + axis[None, :, None] * move[1]
+                + axis[None, None, :] * move[0]
+            )
+        )
+        stored = spectrum * amplitude * ramp
+        if masked:
+            volume = jnp.fft.fftshift(jnp.fft.ifftn(jnp.fft.ifftshift(stored)))
+            stored = jnp.fft.fftshift(
+                jnp.fft.fftn(jnp.fft.ifftshift(volume.real * mask))
+            )
+            stored = stored.at[middle, middle, middle].set(0.0)
+        measured = amplitude > 0.0
+        return jnp.where(
+            measured, stored / jnp.where(measured, amplitude, 1.0), 0.0
+        ).astype(jnp.complex64)
+
+    moved: jax.Array = jax.lax.map(one, (data, weight, moves), batch_size=batch)
+    return moved
+
+
 def recentred(
     subtomograms: Subtomograms,
     centres: NDArray[np.float64] | None = None,
@@ -302,48 +345,39 @@ def recentred(
     Returns:
         The spectra and their weights, on the device.
     """
-    data = to_device(subtomograms.data)
-    weight = to_device(subtomograms.weight)
     if subtomograms.mask_radius is None and centres is None:
-        return data, weight
+        return to_device(subtomograms.data), to_device(subtomograms.weight)
 
     size = subtomograms.band
-    moves = to_device(
+    moves = np.asarray(
         np.zeros((len(subtomograms), 3)) if centres is None else centres,
-        dtype=jnp.float32,
+        dtype=np.float32,
     )
-    axis = (jnp.arange(size) - size // 2) / size
-    middle = size // 2
+    masked = subtomograms.mask_radius is not None
     if subtomograms.mask_radius is None:
-        mask = None
+        mask = jnp.ones((size,) * 3, dtype=jnp.float32)
     else:
         mask = to_device(
             soft_ball(size, subtomograms.mask_radius / subtomograms.scale)
         )
 
-    def one(inputs: tuple[jax.Array, jax.Array, jax.Array]) -> jax.Array:
-        spectrum, amplitude, move = inputs
-        # exp(+2 pi i k . c) moves a volume back by c.
-        ramp = jnp.exp(
-            2j
-            * jnp.pi
-            * (
-                axis[:, None, None] * move[2]
-                + axis[None, :, None] * move[1]
-                + axis[None, None, :] * move[0]
+    # A stretch of the particles at a time, and the result kept on the
+    # host until all of it is there. Doing the whole set in one map held
+    # the stored spectra, the moved ones and a second copy of the moved
+    # ones while they were put together, which twelve thousand particles
+    # do not leave room for.
+    moved = np.empty_like(subtomograms.data)
+    stretch = max(batch, 1) * 32
+    for start in range(0, len(subtomograms), stretch):
+        stop = min(start + stretch, len(subtomograms))
+        moved[start:stop] = to_host(
+            _recentre_stretch(
+                to_device(subtomograms.data[start:stop]),
+                to_device(subtomograms.weight[start:stop]),
+                to_device(moves[start:stop]),
+                mask,
+                masked,
+                max(batch, 1),
             )
         )
-        stored = spectrum * amplitude * ramp
-        if mask is not None:
-            volume = jnp.fft.fftshift(jnp.fft.ifftn(jnp.fft.ifftshift(stored)))
-            stored = jnp.fft.fftshift(
-                jnp.fft.fftn(jnp.fft.ifftshift(volume.real * mask))
-            )
-            stored = stored.at[middle, middle, middle].set(0.0)
-        measured = amplitude > 0.0
-        return jnp.where(
-            measured, stored / jnp.where(measured, amplitude, 1.0), 0.0
-        ).astype(jnp.complex64)
-
-    moved = jax.lax.map(one, (data, weight, moves), batch_size=max(batch, 1))
-    return moved, weight
+    return to_device(moved), to_device(subtomograms.weight)

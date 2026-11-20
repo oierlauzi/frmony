@@ -170,11 +170,10 @@ def _add_run(commands: Any, shared: argparse.ArgumentParser) -> None:
     parser.add_argument(
         '--batch',
         type=_count,
-        default=32,
+        default=8,
         help='Pairs aligned at once, and particles expanded at once '
         '(default: %(default)s). Turn it down if the device runs out of '
-        'memory, up if it is idle. A batch needs roughly '
-        'batch * candidates * band^3 * 8 bytes, times a small constant.',
+        'memory. Turning it up has been measured to be slower.',
     )
     parser.add_argument(
         '--seed', type=int, default=0, help='Which pairs get chosen.'
