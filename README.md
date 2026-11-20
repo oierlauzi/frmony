@@ -1,4 +1,4 @@
-<h1 align="center">syncsta</h1>
+<h1 align="center">frmony</h1>
 
 <p align="center">
 Ab-initio subtomogram averaging by rotational matching and orthogonal group
@@ -7,7 +7,7 @@ synchronization.
 
 ---
 
-`syncsta` builds a structure from cryo-electron tomograms without a reference
+`frmony` builds a structure from cryo-electron tomograms without a reference
 to start from. It aligns subtomograms to each other in **pairs**, which gives a
 noisy relative rotation and shift for each pair, and then finds the single set
 of orientations that agrees best with all of those measurements at once. The
@@ -22,7 +22,7 @@ pseudo-subtomogram, are both carried as one non-negative weight in Fourier
 space. That weight only ever multiplies: nothing is divided by a value the
 microscope left at zero.
 
-> `syncsta` is young. Its API may change between minor releases until 1.0.
+> `frmony` is young. Its API may change between minor releases until 1.0.
 
 ## Status
 

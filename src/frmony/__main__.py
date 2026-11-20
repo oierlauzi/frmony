@@ -1,4 +1,4 @@
-"""Run the command line interface with ``python -m syncsta``."""
+"""Run the command line interface with ``python -m frmony``."""
 
 import sys
 

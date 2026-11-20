@@ -115,7 +115,7 @@ def synchronize(
             non-negative. They need no particular scale.
         start: Orientations to begin from, ``(count, 3, 3)``. A spanning
             tree gives a far better start than chance; see
-            `syncsta.synchronization.rotations`.
+            `frmony.synchronization.rotations`.
         rank: Columns to lift the blocks to. The default, one more than
             twice the dimension, is the relaxation of Burer and Monteiro.
         max_iterations: How many steps at most.

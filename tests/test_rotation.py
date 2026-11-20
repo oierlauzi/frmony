@@ -12,10 +12,10 @@ import numpy as np
 import pytest
 import scipy.special as sp
 
-from syncsta.geometry import euler_to_matrix, random_rotations, relative_angle
-from syncsta.harmonics.legendre import gauss_legendre, orders
-from syncsta.harmonics.transform import expand_shells, make_basis
-from syncsta.matching.rotation import (
+from frmony.geometry import euler_to_matrix, random_rotations, relative_angle
+from frmony.harmonics.legendre import gauss_legendre, orders
+from frmony.harmonics.transform import expand_shells, make_basis
+from frmony.matching.rotation import (
     correlation_grid,
     grid_angles,
     grid_to_euler,

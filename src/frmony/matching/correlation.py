@@ -29,7 +29,7 @@ a question of amplification but of dividing by nothing at all.
 The rotational stage uses ``|D|`` in place of ``D``, which costs the phases
 but gains everything: an amplitude does not move when the particle does, so
 the rotation can be found before the shift is known. The phases come back
-in `syncsta.matching.translation`, which scores the candidates in full.
+in `frmony.matching.translation`, which scores the candidates in full.
 """
 
 from __future__ import annotations
@@ -78,7 +78,7 @@ def expand_particle(
     Args:
         data: A centred Fourier volume, ``(size, size, size)``.
         weight: Its non-negative Fourier weight, the same shape.
-        basis: What `syncsta.harmonics.make_basis` built.
+        basis: What `frmony.harmonics.make_basis` built.
     """
     data = jnp.asarray(data)
     weight = jnp.maximum(jnp.asarray(weight), 0.0)
@@ -113,7 +113,7 @@ def rotation_score(
 
     Returns:
         A real array ``(2B, 2B, 2B)``, indexed by
-        `syncsta.matching.rotation.grid_to_euler`.
+        `frmony.matching.rotation.grid_to_euler`.
     """
     numerator = correlation_grid(
         radial_overlap(left.amplitude, right.amplitude), bandwidth

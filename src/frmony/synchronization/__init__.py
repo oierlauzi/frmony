@@ -9,7 +9,7 @@ afterwards from a linear least-squares problem.
 Symmetry is handled here too, because it is a property of the measurements
 rather than of any one of them: a particle with a point group has an
 orientation defined only up to that group, so each alignment lands on an
-arbitrary member of a coset. `syncsta.symmetry` explains what that does and
+arbitrary member of a coset. `frmony.symmetry` explains what that does and
 why it cannot be undone one pair at a time.
 """
 

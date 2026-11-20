@@ -7,7 +7,7 @@ import math
 import numpy as np
 import pytest
 
-from syncsta.geometry import (
+from frmony.geometry import (
     euler_to_matrix,
     exponential_map,
     logarithmic_map,

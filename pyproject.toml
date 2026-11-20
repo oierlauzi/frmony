@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "syncsta"
+name = "frmony"
 version = "0.1.0"
 description = "Ab-initio subtomogram averaging by rotational matching and orthogonal group synchronization"
 readme = "README.md"
@@ -46,14 +46,14 @@ dev = [
 ]
 
 [project.scripts]
-syncsta = "syncsta.cli:main"
+frmony = "frmony.cli:main"
 
 [project.urls]
-Repository = "https://github.com/oierlauzi/syncsta"
-Issues = "https://github.com/oierlauzi/syncsta/issues"
+Repository = "https://github.com/oierlauzi/frmony"
+Issues = "https://github.com/oierlauzi/frmony/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/syncsta"]
+packages = ["src/frmony"]
 
 [tool.hatch.build.targets.sdist]
 include = ["src", "tests", "README.md", "LICENSE"]
@@ -66,7 +66,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["syncsta"]
+source = ["frmony"]
 
 [tool.ruff]
 line-length = 80

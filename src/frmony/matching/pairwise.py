@@ -9,7 +9,7 @@ gives the correlation at every shift at once and scores the candidate in
 full, phases included.
 
 What comes out is a rotation and a shift satisfying the relation
-`syncsta.geometry` is written in,
+`frmony.geometry` is written in,
 
     V_i(x) = V_j(A.T @ (x - a)),
 
@@ -117,7 +117,7 @@ def candidate_rotations(
 def _euler_to_matrix(
     rot: jax.Array, tilt: jax.Array, psi: jax.Array
 ) -> jax.Array:
-    """`syncsta.geometry.euler_to_matrix`, in JAX and under a trace."""
+    """`frmony.geometry.euler_to_matrix`, in JAX and under a trace."""
     ca, sa = jnp.cos(rot), jnp.sin(rot)
     cb, sb = jnp.cos(tilt), jnp.sin(tilt)
     cg, sg = jnp.cos(psi), jnp.sin(psi)

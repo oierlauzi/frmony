@@ -6,19 +6,19 @@ import numpy as np
 import pytest
 
 from conftest import simulate, spectrum
-from syncsta.geometry import euler_to_matrix, relative_angle
-from syncsta.harmonics.shells import band_radii
-from syncsta.harmonics.transform import make_basis
-from syncsta.matching.correlation import expand_particle, rotation_score
-from syncsta.matching.pairwise import (
+from frmony.geometry import euler_to_matrix, relative_angle
+from frmony.harmonics.shells import band_radii
+from frmony.harmonics.transform import make_basis
+from frmony.matching.correlation import expand_particle, rotation_score
+from frmony.matching.pairwise import (
     Settings,
     align_pair,
     align_pairs,
     candidate_rotations,
 )
-from syncsta.matching.peaks import refine_peak, top_peaks
-from syncsta.matching.rotation import grid_to_euler
-from syncsta.matching.translation import (
+from frmony.matching.peaks import refine_peak, top_peaks
+from frmony.matching.rotation import grid_to_euler
+from frmony.matching.translation import (
     frequency_grid,
     rotate_spectrum,
     shift_correlation,

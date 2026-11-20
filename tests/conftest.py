@@ -106,7 +106,7 @@ def simulate(
     the frame of the tomogram, so it does *not* turn with the particle,
     which is the whole difficulty the score has to handle.
     """
-    from syncsta.geometry import random_rotations
+    from frmony.geometry import random_rotations
 
     structure = phantom(size, blobs, rng)
     wedge = wedge_mask(size, tilt)

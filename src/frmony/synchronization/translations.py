@@ -2,7 +2,7 @@
 
 A pair that has been aligned says how far apart two particles are as well
 as how they are turned relative to one another. With the orientations
-settled, what is left is linear. From the relation `syncsta.geometry` is
+settled, what is left is linear. From the relation `frmony.geometry` is
 written in,
 
     V_i(x) = V_j(A_ij.T @ (x - a_ij)),    A_ij = Q_i @ Q_j.T,

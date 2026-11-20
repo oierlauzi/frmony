@@ -1,6 +1,6 @@
 """Command line interface.
 
-It is made of commands, ``syncsta COMMAND ...``. A command is a function
+It is made of commands, ``frmony COMMAND ...``. A command is a function
 that adds its parser to those of the others, with the function that runs it
 as the ``run`` default, and is listed in `build_parser`.
 """
@@ -324,7 +324,7 @@ _COMMANDS: tuple[Callable[[Any, argparse.ArgumentParser], None], ...] = (
 def build_parser() -> argparse.ArgumentParser:
     """The parser of every command."""
     parser = argparse.ArgumentParser(
-        prog='syncsta',
+        prog='frmony',
         description=(
             'Ab-initio subtomogram averaging by rotational matching and '
             'orthogonal group synchronization.'
@@ -333,7 +333,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         '--version',
         action='version',
-        version=metadata.version('syncsta'),
+        version=metadata.version('frmony'),
     )
     commands = parser.add_subparsers(dest='command', required=True)
     shared = _shared_parser()
@@ -362,6 +362,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         run(**vars(arguments))
     except (OSError, ValueError) as error:
-        print(f'syncsta: {error}', file=sys.stderr)
+        print(f'frmony: {error}', file=sys.stderr)
         return 1
     return 0

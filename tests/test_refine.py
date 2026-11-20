@@ -6,17 +6,17 @@ import numpy as np
 import pytest
 
 from conftest import phantom, rotate_volume, simulate, spectrum
-from syncsta.geometry import random_rotations, relative_angle
-from syncsta.harmonics.shells import band_radii
-from syncsta.harmonics.transform import make_basis
-from syncsta.matching.correlation import expand_particle
-from syncsta.matching.pairwise import Settings, align_pair
-from syncsta.matching.refine import (
+from frmony.geometry import random_rotations, relative_angle
+from frmony.harmonics.shells import band_radii
+from frmony.harmonics.transform import make_basis
+from frmony.matching.correlation import expand_particle
+from frmony.matching.pairwise import Settings, align_pair
+from frmony.matching.refine import (
     exponential_map,
     refine_alignment,
     score_at,
 )
-from syncsta.matching.translation import frequency_grid
+from frmony.matching.translation import frequency_grid
 
 SIZE = 32
 BANDWIDTH = 16
@@ -199,7 +199,7 @@ def test_the_score_agrees_with_the_shift_search(
     """`score_at` is the same quantity the grid search maximizes."""
     import jax.numpy as jnp
 
-    from syncsta.matching.translation import shift_correlation
+    from frmony.matching.translation import shift_correlation
 
     simulation = simulate(rng, 2, size=SIZE, tilt=60.0)
     grid = jnp.asarray(frequency_grid(SIZE))
@@ -268,8 +268,8 @@ def test_a_wedge_moves_the_peak_away_from_the_truth(
 
 
 def test_the_pipeline_can_turn_it_on(rng: np.random.Generator) -> None:
-    from syncsta.particles import Subtomograms
-    from syncsta.pipeline import Design, run
+    from frmony.particles import Subtomograms
+    from frmony.pipeline import Design, run
 
     simulation = simulate(rng, 8, size=SIZE, tilt=60.0)
     subtomograms = Subtomograms(

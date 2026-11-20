@@ -14,19 +14,19 @@ import numpy as np
 import pytest
 import scipy.special as sp
 
-from syncsta.harmonics.legendre import (
+from frmony.harmonics.legendre import (
     gauss_legendre,
     legendre_table,
     orders,
 )
-from syncsta.harmonics.shells import shell_directions, shell_grid
-from syncsta.harmonics.transform import (
+from frmony.harmonics.shells import shell_directions, shell_grid
+from frmony.harmonics.transform import (
     Basis,
     expand,
     expand_shells,
     make_basis,
 )
-from syncsta.harmonics.wigner import (
+from frmony.harmonics.wigner import (
     half_turn_table,
     quarter_turn_identity,
     wigner_d,

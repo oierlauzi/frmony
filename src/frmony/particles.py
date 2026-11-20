@@ -107,7 +107,7 @@ def load_subtomograms(
             synthesised as a missing wedge.
         cone: Half aperture [deg], for a missing cone instead.
         weight_transform: How to read a RELION weight; see
-            `syncsta.io.wedge.relion_weight`.
+            `frmony.io.wedge.relion_weight`.
         mask_radius: Radius of a soft real-space mask [voxels]. None
             leaves the volumes alone.
         batch: How many volumes to read at a time.

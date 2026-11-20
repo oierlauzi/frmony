@@ -5,19 +5,19 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from syncsta.geometry import random_rotations, relative_angle
-from syncsta.graph import build_pairs
-from syncsta.symmetry import point_group
-from syncsta.synchronization.power_method import (
+from frmony.geometry import random_rotations, relative_angle
+from frmony.graph import build_pairs
+from frmony.symmetry import point_group
+from frmony.synchronization.power_method import (
     collapse,
     polar_rows,
     synchronize,
 )
-from syncsta.synchronization.rotations import (
+from frmony.synchronization.rotations import (
     propagate_along_tree,
     synchronize_rotations,
 )
-from syncsta.synchronization.translations import synchronize_shifts
+from frmony.synchronization.translations import synchronize_shifts
 
 
 def _symmetric_agreement(
@@ -107,7 +107,7 @@ def _measurements(
 
     if noise > 0.0:
         angles = rng.normal(0.0, noise, size=(len(left), 3))
-        from syncsta.geometry import exponential_map
+        from frmony.geometry import exponential_map
 
         measured = measured @ exponential_map(np.radians(angles))
     return truth, left, right, measured
@@ -451,7 +451,7 @@ def test_everything_together(rng: np.random.Generator) -> None:
     left, right = build_pairs(count, 8, rng)
 
     relative = truth[left] @ np.swapaxes(truth[right], -2, -1)
-    from syncsta.geometry import exponential_map
+    from frmony.geometry import exponential_map
 
     wobble = exponential_map(
         np.radians(rng.normal(0.0, 3.0, size=(len(left), 3)))

@@ -56,7 +56,7 @@ class Design:
     lowest: float = 0.125
     """Innermost sphere of the expansion, as a fraction of the box. The
     frequencies below it carry a particle's mass rather than its
-    orientation; see `syncsta.harmonics.band_radii`."""
+    orientation; see `frmony.harmonics.band_radii`."""
     symmetry: str = 'C1'
     """Point group of the particle."""
     rounds: int = 4
@@ -71,7 +71,7 @@ class Design:
     room."""
     refine: bool = False
     """Polish each pair against the score itself after the grid search.
-    Off by default; `syncsta.matching.refine` says why."""
+    Off by default; `frmony.matching.refine` says why."""
     detect: bool = True
     """Report the symmetry the measurements suggest, whatever was asked
     for."""
@@ -130,7 +130,7 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
     """Align, synchronize and average a set of subtomograms.
 
     Args:
-        subtomograms: What `syncsta.particles.load_subtomograms` built.
+        subtomograms: What `frmony.particles.load_subtomograms` built.
         design: What to do. The defaults if not given.
 
     Returns:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from syncsta.graph import build_pairs, is_connected, spanning_tree
+from frmony.graph import build_pairs, is_connected, spanning_tree
 
 
 @pytest.fixture

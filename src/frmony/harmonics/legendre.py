@@ -142,3 +142,67 @@ def quadrature_table(bandwidth: int, nodes: int) -> NDArray[np.float64]:
 def orders(bandwidth: int) -> NDArray[np.int64]:
     """The order ``m`` that each column of a rectangle stands for."""
     return _ravel_m(bandwidth)
+
+
+def _legendre_on(
+    bandwidth: int, cosine: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """`legendre_table` at colatitudes given by their cosines.
+
+    The table itself is built on a quadrature, whose nodes are fixed by the
+    bandwidth. The five-degree-of-freedom matching needs the same functions
+    wherever its own grid happens to put them, so the recurrence is run on
+    whatever is handed to it.
+
+    Args:
+        bandwidth: Degrees below this are built.
+        cosine: Cosines of the colatitudes, ``(points,)``.
+
+    Returns:
+        ``(points, bandwidth, 2 * bandwidth)``, laid out as
+        `legendre_table`.
+    """
+    if bandwidth < 1:
+        raise ValueError(f'The bandwidth must be positive, not {bandwidth}.')
+    cosine = np.asarray(cosine, dtype=np.float64)
+    sine = np.sqrt(np.maximum(1.0 - cosine * cosine, 0.0))
+    points = len(cosine)
+
+    upper = np.zeros((bandwidth, bandwidth, points))
+    upper[0, 0] = 1.0 / np.sqrt(4.0 * np.pi)
+    for degree in range(1, bandwidth):
+        upper[degree, degree] = (
+            -np.sqrt((2.0 * degree + 1.0) / (2.0 * degree))
+            * sine
+            * upper[degree - 1, degree - 1]
+        )
+        upper[degree, degree - 1] = (
+            np.sqrt(2.0 * degree + 1.0) * cosine * upper[degree - 1, degree - 1]
+        )
+        for order in range(degree - 1):
+            first = np.sqrt(
+                (4.0 * degree * degree - 1.0) / (degree**2 - order**2)
+            )
+            second = np.sqrt(
+                (
+                    (2.0 * degree + 1.0)
+                    * (degree + order - 1.0)
+                    * (degree - order - 1.0)
+                )
+                / ((2.0 * degree - 3.0) * (degree - order) * (degree + order))
+            )
+            upper[degree, order] = (
+                first * cosine * upper[degree - 1, order]
+                - second * upper[degree - 2, order]
+            )
+
+    table = np.zeros((points, bandwidth, 2 * bandwidth))
+    for column, order in enumerate(_ravel_m(bandwidth)):
+        magnitude = abs(int(order))
+        if magnitude >= bandwidth:
+            continue
+        sign = -1.0 if (order < 0 and magnitude % 2) else 1.0
+        table[:, magnitude:, column] = sign * np.moveaxis(
+            upper[magnitude:, magnitude], -1, 0
+        )
+    return table

@@ -159,7 +159,7 @@ def shift_of_index(index: ArrayLike, size: int) -> jax.Array:
 
     The shift is the one to apply to the turned second particle to bring it
     onto the first, so that together with the rotation it satisfies the
-    relation `syncsta.geometry` is written in:
+    relation `frmony.geometry` is written in:
 
         V_i(x) = V_j(A.T @ (x - a)).
     """

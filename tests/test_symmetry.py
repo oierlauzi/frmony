@@ -7,8 +7,8 @@ import math
 import numpy as np
 import pytest
 
-from syncsta.geometry import random_rotations, relative_angle, rotation_angle
-from syncsta.symmetry import (
+from frmony.geometry import random_rotations, relative_angle, rotation_angle
+from frmony.symmetry import (
     detect_symmetry,
     point_group,
     residual_angles,

@@ -8,7 +8,7 @@ rotated copy of another is
 
 where ``I`` is the radial overlap of the two sets of coefficients and ``D``
 is a Wigner matrix. Two of the three Euler angles enter ``D`` as
-exponentials already. The quarter-turn identity in `syncsta.harmonics.wigner`
+exponentials already. The quarter-turn identity in `frmony.harmonics.wigner`
 makes the third one an exponential too, and the whole correlation collapses
 into a Fourier series in all three:
 

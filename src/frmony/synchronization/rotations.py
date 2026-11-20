@@ -1,12 +1,12 @@
 """Orientations from pairwise measurements, symmetry and outliers included.
 
-`syncsta.synchronization.power_method` solves the clean problem: given
+`frmony.synchronization.power_method` solves the clean problem: given
 measurements that are all honest attempts at ``Q_i @ Q_j.T``, find the
 orientations. Two things stop real measurements from being that.
 
 A particle with point group ``G`` has an orientation defined only up to
 ``G``, so an alignment measures some member of a coset rather than the
-relative orientation itself. `syncsta.symmetry` explains why that cannot be
+relative orientation itself. `frmony.symmetry` explains why that cannot be
 fixed one pair at a time, and gives the step that fixes it once an estimate
 exists. Here the two are alternated: snap every measurement onto the coset
 member nearest the current estimate, synchronize, repeat. With a trivial
@@ -182,7 +182,7 @@ def synchronize_rotations(
         # frame is the named one conjugated by that rotation -- the same
         # group with its axes somewhere else. Worse, the rotation changes
         # from round to round, so a group read off once goes stale and
-        # starts rejecting the pairs that are right. See `syncsta.symmetry`.
+        # starts rejecting the pairs that are right. See `frmony.symmetry`.
         group = _frame_group(left, right, measurements, orientations, order)
         if len(group) < order and attempt == 0:
             _LOGGER.warning(

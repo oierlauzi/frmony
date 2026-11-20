@@ -8,11 +8,11 @@ import numpy as np
 import pytest
 
 from conftest import simulate, wedge_mask
-from syncsta.io.maps import write_map, write_spectrum
-from syncsta.io.registry import available, read_source, register
-from syncsta.io.star import read_star, write_star
-from syncsta.io.volumes import crop_spectrum, prepare, soft_ball
-from syncsta.io.wedge import (
+from frmony.io.maps import write_map, write_spectrum
+from frmony.io.registry import available, read_source, register
+from frmony.io.star import read_star, write_star
+from frmony.io.volumes import crop_spectrum, prepare, soft_ball
+from frmony.io.wedge import (
     cone_weight,
     half_to_centred,
     relion_weight,
@@ -172,7 +172,7 @@ def _write_relion(
     import pandas as pd
     import starfile
 
-    from syncsta.io.maps import write_map
+    from frmony.io.maps import write_map
 
     size = 16
     simulation = simulate(rng, count, size=size, tilt=60.0)
@@ -261,7 +261,7 @@ def test_the_answer_is_written_beside_what_came_in(
 ) -> None:
     import starfile
 
-    from syncsta.geometry import matrix_to_euler, random_rotations
+    from frmony.geometry import matrix_to_euler, random_rotations
 
     path = _write_relion(tmp_path, rng, 5, 'relion5')
     metadata = read_star(path)
@@ -331,7 +331,7 @@ def test_an_unknown_format_is_refused(tmp_path: Path) -> None:
 
 def test_a_format_can_be_added(tmp_path: Path) -> None:
     """New conventions are registered, not wired into a chain of ifs."""
-    from syncsta.io.registry import Source
+    from frmony.io.registry import Source
 
     register(
         'invented',

@@ -28,4 +28,4 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: uv run --extra dev pytest --cov=syncsta --cov-report=term-missing
+      - run: uv run --extra dev pytest --cov=frmony --cov-report=term-missing

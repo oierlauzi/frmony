@@ -8,14 +8,14 @@ import numpy as np
 import pytest
 
 from conftest import simulate, wedge_mask
-from syncsta.averaging import (
+from frmony.averaging import (
     average,
     fourier_shell_correlation,
     resolution_at,
 )
-from syncsta.geometry import relative_angle
-from syncsta.particles import Subtomograms, load_subtomograms
-from syncsta.pipeline import Design, Result, run
+from frmony.geometry import relative_angle
+from frmony.particles import Subtomograms, load_subtomograms
+from frmony.pipeline import Design, Result, run
 
 
 def _subtomograms(rng: np.random.Generator, count: int, **kwargs: object):
@@ -235,7 +235,7 @@ def _relion_project(
     import pandas as pd
     import starfile
 
-    from syncsta.io.maps import write_map
+    from frmony.io.maps import write_map
 
     size = 24
     simulation = simulate(rng, count, size=size, tilt=60.0)
@@ -273,7 +273,7 @@ def test_a_relion_project_loads(
     tmp_path: Path, rng: np.random.Generator
 ) -> None:
     path, _ = _relion_project(tmp_path, rng, 5)
-    from syncsta.io.registry import read_source
+    from frmony.io.registry import read_source
 
     source = read_source(path)
     assert source.weights is not None
@@ -293,7 +293,7 @@ def test_the_loader_refuses_a_set_with_no_weight(
     tmp_path: Path, rng: np.random.Generator
 ) -> None:
     path, _ = _relion_project(tmp_path, rng, 3)
-    from syncsta.io.registry import read_source
+    from frmony.io.registry import read_source
 
     source = read_source(path)
     with pytest.raises(ValueError, match='no weight'):
@@ -309,7 +309,7 @@ def test_the_command_line_runs(
     tmp_path: Path, rng: np.random.Generator
 ) -> None:
     """The whole thing as someone would actually invoke it."""
-    from syncsta.cli import main
+    from frmony.cli import main
 
     path, _ = _relion_project(tmp_path, rng, 12)
     output = tmp_path / 'run'

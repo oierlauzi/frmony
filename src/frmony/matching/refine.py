@@ -1,6 +1,6 @@
 """Polishing an alignment off the grid.
 
-The two stages of `syncsta.matching.pairwise` leave a rotation and a shift
+The two stages of `frmony.matching.pairwise` leave a rotation and a shift
 on a grid, improved by fitting a parabola through their neighbours. That is
 good to a fraction of the step and no better, because a parabola is not the
 score. This refines them against the score itself, by gradient.
@@ -96,7 +96,7 @@ def score_at(
 ) -> jax.Array:
     """The constrained score at one rotation and one shift.
 
-    The same quantity `syncsta.matching.translation` evaluates at every
+    The same quantity `frmony.matching.translation` evaluates at every
     shift at once, written for a single one so that it can be
     differentiated with respect to both.
     """
