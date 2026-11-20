@@ -65,8 +65,9 @@ From Python, where each stage stands on its own:
 ```python
 import frmony
 
-subtomograms = frmony.load_subtomograms(paths, weight_paths=weights,
-                                        pixel_size=4.2)
+subtomograms = frmony.load_subtomograms(
+    paths, weight_paths=weights, pixel_size=4.2
+)
 result = frmony.run(subtomograms, frmony.Design(partners=16, symmetry='C1'))
 
 print(result.resolution, result.orientations.shape)
