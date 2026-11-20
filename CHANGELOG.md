@@ -49,3 +49,7 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
   without being edited. The average is a weighted one in Fourier space,
   where the particles supply each other the frequencies their own missing
   wedges never reached.
+- `matching.refine`, an optional polish of each pair against the score
+  itself, by gradient. Off by default: it raises the score every time, but
+  where a wide wedge is missing the peak of the score is not quite at the
+  true orientation, so climbing harder can walk away from it.

@@ -23,6 +23,7 @@ from .pairwise import (
     candidate_rotations,
 )
 from .peaks import refine_peak, top_peaks
+from .refine import refine_alignment, score_at
 from .rotation import (
     correlation_grid,
     grid_angles,
@@ -50,10 +51,12 @@ __all__ = [
     'grid_angles',
     'grid_to_euler',
     'radial_overlap',
+    'refine_alignment',
     'refine_peak',
     'rotate_spectrum',
     'rotation_score',
     'rotational_correlation',
+    'score_at',
     'shift_correlation',
     'shift_of_index',
     'top_peaks',

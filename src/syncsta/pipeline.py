@@ -26,6 +26,7 @@ from .harmonics.shells import band_radii
 from .harmonics.transform import make_basis
 from .matching.correlation import expand_particle
 from .matching.pairwise import Settings, align_pairs
+from .matching.refine import refine_alignment
 from .particles import Subtomograms
 from .symmetry import detect_symmetry
 from .synchronization.rotations import synchronize_rotations
@@ -68,6 +69,9 @@ class Design:
     batch: int = 4
     """Pairs aligned at once. Larger is faster until the device runs out of
     room."""
+    refine: bool = False
+    """Polish each pair against the score itself after the grid search.
+    Off by default; `syncsta.matching.refine` says why."""
     detect: bool = True
     """Report the symmetry the measurements suggest, whatever was asked
     for."""
@@ -196,6 +200,26 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
     measurements = np.asarray(aligned.rotation, dtype=np.float64)
     measured_shifts = np.asarray(aligned.shift, dtype=np.float64)
     scores = np.asarray(aligned.score, dtype=np.float64)
+
+    if design.refine:
+        started = time.perf_counter()
+        for index, (first, second) in enumerate(zip(left, right, strict=True)):
+            turn, offset, value = refine_alignment(
+                subtomograms.data[first],
+                subtomograms.weight[first],
+                subtomograms.data[second],
+                subtomograms.weight[second],
+                measurements[index],
+                measured_shifts[index],
+            )
+            measurements[index] = np.asarray(turn, dtype=np.float64)
+            measured_shifts[index] = np.asarray(offset, dtype=np.float64)
+            scores[index] = float(value)
+        _LOGGER.info(
+            'Refined %d pairs in %.1f s.',
+            len(left),
+            time.perf_counter() - started,
+        )
     # A correlation runs from minus one to one; a weight does not.
     weights = np.clip(0.5 * (1.0 + scores), 0.0, 1.0)
 

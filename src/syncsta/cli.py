@@ -165,6 +165,15 @@ def _add_run(commands: Any, shared: argparse.ArgumentParser) -> None:
     parser.add_argument(
         '--seed', type=int, default=0, help='Which pairs get chosen.'
     )
+    parser.add_argument(
+        '--refine',
+        action='store_true',
+        help='Polish each pair against the score itself after the grid '
+        'search. This reliably raises the score, but where a wide wedge is '
+        'missing the peak of the score is not quite at the true '
+        'orientation, so it can move the answer away from it. Off unless '
+        'asked for.',
+    )
     parser.set_defaults(run=_run_pipeline)
 
 
@@ -187,6 +196,7 @@ def _run_pipeline(
     reject_above: float,
     batch: int,
     seed: int,
+    refine: bool,
     device: str | None,
 ) -> None:
     """Run the whole pipeline and write what it found."""
@@ -233,6 +243,7 @@ def _run_pipeline(
             reject_above=reject_above if reject_above > 0.0 else None,
             batch=batch,
             seed=seed,
+            refine=refine,
         )
         result = run(subtomograms, design)
 
