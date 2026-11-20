@@ -13,6 +13,17 @@ multiplies, so nothing is divided by a value that the microscope left at zero.
 
 from __future__ import annotations
 
-__all__ = ['__version__']
+from .geometry import euler_to_matrix, matrix_to_euler
+from .graph import build_pairs
+from .symmetry import detect_symmetry, point_group
+
+__all__ = [
+    '__version__',
+    'build_pairs',
+    'detect_symmetry',
+    'euler_to_matrix',
+    'matrix_to_euler',
+    'point_group',
+]
 
 __version__ = '0.1.0'
