@@ -7,23 +7,24 @@ group synchronization.
 
 ---
 
-`frmony` reconstructs an average volume from cryo-electron subtomograms with 
-no reference to start from.
+`frmony` reconstructs an average volume from cryo-electron subtomograms
+with no reference to start from.
 
-The usual route — refine against a growing average — needs something to
-begin with, and tends to find whatever it was given. `frmony` takes the
-other one. It aligns subtomograms to each other in **pairs**, which gives a
-noisy relative orientation and shift for each pair, and then finds the
-single set of orientations that agrees best with all of those measurements
-at once. The rotations come from orthogonal group synchronization and the
-centres from linear least squares. Nothing is ever compared against a
-reference, so nothing can be biased by one.
+The usual method refines each subtomogram against a growing average. That
+needs a starting reference, and it tends to find whatever it was given.
+`frmony` works the other way round. It aligns subtomograms to each other in
+pairs. Each pair gives one noisy relative orientation and shift. It then
+looks for the single set of orientations that fits all of those
+measurements at once. Orthogonal group synchronization gives the rotations.
+Linear least squares gives the centres. Nothing is ever compared against a
+reference, so no reference can bias the result.
 
-The missing wedge and the contrast transfer function are the same kind of
-fact about the data — some frequencies were measured well, some badly, some
-not at all — and both are carried as one non-negative weight in Fourier
-space. **That weight only ever multiplies.** Nothing is divided by it, which
-matters because it is exactly zero across the wedge and at every zero of the
+A tomogram does not measure every frequency. The tilt range leaves a wedge
+of Fourier space empty. The contrast transfer function crosses zero at
+frequencies of its own. `frmony` treats both as one non-negative weight in
+Fourier space, saying how much of each frequency reached the subtomogram.
+The weight only ever multiplies. Nothing divides by it. That matters,
+because it is exactly zero across the wedge and at every zero of the
 transfer function.
 
 > `frmony` is young. Its API may change between minor releases until 1.0.
@@ -34,7 +35,7 @@ transfer function.
 pip install frmony
 ```
 
-For a GPU, which is where this belongs:
+With a GPU:
 
 ```bash
 pip install 'frmony[cuda12]'
@@ -42,25 +43,25 @@ pip install 'frmony[cuda12]'
 
 ## Using it
 
-RELION three-dimensional pseudo-subtomograms, four or five — the format is
-identical and the version is detected, not asked for:
+RELION three-dimensional pseudo-subtomograms, version 4 or 5. The two write
+the same files, and the version is detected rather than asked for.
 
 ```bash
 frmony run Extract/job006/particles.star run1/ --partners 16 --verbose
 ```
 
-Plain volumes, with the missing wedge named:
+Plain volumes, with the missing wedge given on the command line:
 
 ```bash
 frmony run subtomograms.txt run1/ --tilt 60 --pixel-size 4.2
 ```
 
-Out comes `average.mrc`, a `support.mrc` saying which frequencies the answer
-actually rests on, a `resolution.txt` holding the half-set shell
-correlation, and a `synchronized.star` carrying the orientations and centres
-beside every column that came in.
+Four files are written. `average.mrc` is the average. `support.mrc` says
+how much weight stands behind each frequency of it. `resolution.txt` holds
+the half-set shell correlation. `synchronized.star` holds the orientations
+and centres, beside every column that came in.
 
-From Python, where each stage stands on its own:
+The Python API exposes each stage on its own:
 
 ```python
 import frmony
@@ -75,64 +76,116 @@ print(result.resolution, result.orientations.shape)
 
 ## How it works
 
-**Pairwise alignment** is in two stages. The rotation is found first, on the
-*amplitudes* of the two Fourier transforms, which do not move when the
-particle does — so the rotation can be found before the shift is known. That
-is one inverse FFT over all of SO(3) at once, which is Kovacs and Wriggers
-(2002). The best few rotations are kept rather than the best one, because
-amplitudes throw away the phases and so discriminate less; the right one is
-reliably among the best few even when it is not the best. Each candidate
-then gets a single transform giving the correlation at every shift at once,
-scored in full.
+### Pairwise alignment
 
-**Synchronization** maximizes the agreement with every pair at once by a
-generalized power method, then solves the centres by least squares.
+This happens in two stages.
 
-**Averaging** happens in Fourier space, weighted. Each particle's wedge
-turns with the particle, so a mean of the volumes would add the gaps
-together; weighting by what each one actually measured lets them supply each
-other instead. On simulated data the coverage of Fourier space goes from
-0.71 for a single particle to 0.996 for twenty-four.
+The first stage finds the rotation. It works on the amplitudes of the two
+Fourier transforms, which do not move when the particle does, so the
+rotation can be found before the shift is known. One inverse FFT gives the
+correlation at every rotation of a grid at once. This is Kovacs and
+Wriggers (2002).
+
+That stage keeps the best few rotations rather than the best one.
+Amplitudes throw away the phases, so they discriminate less than the full
+score does. The right rotation is reliably among the best few even when it
+is not the best one.
+
+The second stage takes each of those candidates and runs one more
+transform. That gives the correlation at every shift at once, with the
+phases back in.
+
+### Synchronization
+
+A generalized power method finds the orientations that fit every pair best.
+Least squares then gives the centres.
+
+### Averaging
+
+The average is weighted, and taken in Fourier space. Each particle's
+missing wedge turns with the particle. Averaging the volumes would stack
+the gaps on top of one another. Weighting each particle by what it actually
+measured lets the particles fill in each other's gaps instead. On simulated
+data the coverage of Fourier space rises from 0.71 for a single particle to
+0.996 for twenty-four.
 
 ### Symmetry
 
-A particle with point group `G` has an orientation defined only up to `G`,
-so an alignment measures an arbitrary member of a coset rather than the
-relative orientation itself. Around a triangle the residual is a group
-element *conjugated into a frame nobody knows yet*, which is what makes this
-harder than ordinary outlier rejection.
+A particle with point group `G` has an orientation that is only defined up
+to `G`. An alignment therefore measures some member of a coset, and not the
+relative orientation itself. Go round a triangle of pairs and the residual
+is a group element, but conjugated into a frame that nobody knows yet. That
+is what makes this harder than ordinary outlier rejection.
 
-Pass `--symmetry C4` and each measurement is snapped onto the coset member
-nearest the current estimate before each round, which is exact at the
-solution and does nothing at all when the group is trivial. Residuals are
-measured modulo the group, because with C4 a residual of ninety degrees is a
-*perfect* measurement and a rule that did not know would discard exactly the
+Pass `--symmetry C4`. Before each round, every measurement is moved onto
+the coset member closest to the current estimate. The step is exact at the
+solution. It does nothing at all when the group is trivial, so there is one
+code path and not two.
+
+Residuals are measured modulo the group. This matters more than it sounds.
+With C4 symmetry a residual of ninety degrees is a perfect measurement. A
+rule that did not know about the symmetry would throw away exactly the
 pairs that are right.
 
-The symmetry is also detected, always, from the angles of the triangle
-residuals — which works with no orientation in hand, because an angle does
-not change under conjugation. It sees angles and not axes, so it separates
-the cyclic groups and confuses `D2` with `C2`; it is a warning that what you
-asked for does not match the data, not a decision about what to use.
+`frmony` also reports the symmetry it reads off the angles of the triangle
+residuals. That works with no orientation estimate at all, because
+conjugation does not change an angle. It sees angles and not axes, so it
+tells the cyclic groups apart but reads `D2` as `C2`. Treat it as a warning
+that the data disagrees with what you asked for, not as a decision about
+what to use.
+
+## Limitations
+
+Worth reading before trusting the output.
+
+**The STAR output has not been checked against RELION.** `frmony` writes
+its orientations as ZYZ Euler angles and its centres in angstroms. That is
+the natural reading of those columns. Whether RELION takes an orientation
+to mean that one or its inverse, and whether it adds or subtracts the
+origin, has not been tested against RELION itself. Either would be silent
+if wrong, and would give a wrong map rather than an error. Check the output
+against a refinement of the same particles before relying on it.
+
+**Accuracy has only been measured on simulated data.** Take a sixty degree
+tilt range and no noise. The median error of a pair is then about five
+degrees, and synchronization brings it down to three. With noise as large
+as the signal, the synchronized median is five degrees. At twice the signal
+it is fourteen. At three times it breaks down, at forty-three. Real
+subtomograms are often noisier than that. `frmony` has not been run on real
+data at all.
+
+**Volumes are read one at a time.** The loader does not yet overlap reads
+with computation.
+
+**A connected graph of pairs is not enough.** Two groups of particles may
+hang together by a single pair. Everything they say about each other then
+rests on that one measurement. Nothing else in the data can contradict it.
+`frmony` warns when the surviving pairs include such a bridge. The graphs
+it builds by default have none. This is about what heavy outlier rejection
+can leave behind.
 
 ## What is here
 
 | Module | |
 |---|---|
-| `frmony.harmonics` | Spherical expansion of a volume, exactly, on a Gauss-Legendre quadrature |
+| `frmony.harmonics` | Spherical expansion of a volume, on a Gauss-Legendre quadrature |
 | `frmony.matching` | The pairwise engine: rotation, translation, the constrained score |
 | `frmony.synchronization` | Orientations by generalized power method, centres by least squares |
 | `frmony.symmetry` | Point groups, and what they do to a set of measurements |
 | `frmony.io` | RELION tables and volumes, through `starfile` and `vitrio` |
 
-Two further engines ship and are off by default. `matching.refine` polishes
-each pair against the score itself by gradient; it raises the score every
-time, but where a wide wedge is missing the peak of the score is not quite
-at the true orientation, so climbing harder can walk away from it.
-`matching.frm5d` holds the mathematics of the five-degree-of-freedom method
-of Kovacs et al. (2003) — the two-centre integrals and the five-dimensional
-series, held to an exact identity — but not yet the map from a grid index
-back to a pair of rotations, so it is not yet an engine to dispatch to.
+Two more engines ship, both off by default.
+
+`matching.refine` polishes each pair against the score itself, by gradient.
+It raises the score every time. Where a wide wedge is missing, though, the
+peak of the score sits a little away from the true orientation. Climbing
+harder can then walk away from the right answer.
+
+`matching.frm5d` holds the mathematics of the five degree of freedom method
+of Kovacs et al. (2003). The two-centre integrals and the five-dimensional
+series are built and tested against an exact identity. What is missing is
+the map from a grid index back to a pair of rotations, so this is not yet
+an engine that `matching` will dispatch to.
 
 ## References
 
