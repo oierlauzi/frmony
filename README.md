@@ -148,13 +148,6 @@ data at all.
 **Volumes are read one at a time.** The loader does not yet overlap reads
 with computation.
 
-**A connected graph of pairs is not enough.** Two groups of particles may
-hang together by a single pair. Everything they say about each other then
-rests on that one measurement. Nothing else in the data can contradict it.
-`frmony` warns when the surviving pairs include such a bridge. The graphs
-it builds by default have none. This is about what heavy outlier rejection
-can leave behind.
-
 ## What is here
 
 | Module | |
