@@ -22,9 +22,34 @@ both particles and on ``rho``, so nothing can be shared between pairs and
 nothing batches. Across a graph of a hundred thousand pairs that is the
 difference between minutes and days.
 
-What it is for is checking. Run on a sample of pairs it says, independently
-and by a different route, whether the default engine is finding the right
-answer.
+What it is for is measuring. It searches the six degrees of freedom of a
+pair at once, so it is what a cheaper search of them should be held
+against, and `frmony.matching.pairwise` does the same search another way.
+
+Four things have to be right before it says anything about real
+subtomograms, and each was found by it saying nothing.
+
+The volumes are real-space ones. A shift is a displacement there, which
+is what the two-centre integrals are built on; in Fourier space it is a
+phase.
+
+They are band-passed to the frequencies the rotational search uses. The
+lowest ones carry a particle's mass and swamp the sum, exactly as they
+do in three dimensions.
+
+They are sampled twice as finely as the band, and the shells are half a
+voxel of it apart. A density whose shortest wave is two voxels cannot be
+read off shells a voxel apart and interpolated between.
+
+And the score is divided by the denominators of the constrained
+correlation, which depend on the relative rotation alone and so come
+from the three-dimensional grids.
+
+With those, on pairs of EMPIAR-10304 at bandwidth 24: 51 in a hundred
+aligned to within fifteen degrees with the distance held at nothing,
+which is what the three-dimensional search gives, 27 with the distance
+searched on centred pairs, and 22 to 24 on pairs forty angstroms apart,
+where a search of rotations alone gives 6. At 1.4 seconds a pair.
 
 The two-centre integrals are the whole cost, and Appendix A of the paper is
 what makes them affordable. In cylindrical coordinates, with ``s = r sin
@@ -63,6 +88,7 @@ __all__ = [
     'CylindricalGrid',
     'correlation_5d',
     'cylindrical_grid',
+    'grid_to_rotations',
     'memory_for',
     'series_5d',
     'two_centre_integrals',
@@ -263,31 +289,67 @@ def two_centre_integrals(
 def series_5d(integrals: ArrayLike, bandwidth: int) -> jax.Array:
     """The Fourier coefficients of the correlation in five angles.
 
+    Derived from the three-dimensional series and not from the papers.
+    `frmony.matching.rotation.correlation_grid` is held to a direct
+    quadrature by a test, so it is a trustworthy expression for the
+    matrix elements of a rotation: for any ``I``,
+
+        grid(Q) = sum_{l,n,m} conj(D^l_{nm}(Q)) I^l_{nm}
+                = sum_{n,h,m} [sum_l I p_n conj(p_m) q_{lhn} q_{lhm}]
+                  exp(+i n a) exp(-i h b) exp(+i m c),
+
+    with ``p`` the powers of ``i``, ``q`` the quarter-turn table and
+    ``(a, b, c)`` the angles of the grid index. The two-body correlation
+    is
+
+        c(Q1, Q2; rho) = sum D^l_{nm}(Q1) conj(D^L_{nM}(Q2)) K^n_{lm,LM}
+
+    with ``K`` the two-centre integrals, and putting the first into the
+    second gives
+
+        U[n, h, m, H, M] = sum_{l,L} p_m conj(p_M)
+                           q_{lhn} q_{lhm} q_{LHn} q_{LHM} K^n_{lm,LM},
+        c = sum U exp(-i n d) exp(+i h b) exp(-i m c)
+                  exp(-i H b') exp(+i M c').
+
+    Both bodies share the order ``n``, so only the difference ``d`` of
+    their first angles enters.
+
+    What stood here before left out the powers of ``i``, mirrored the
+    order of the second body and took every axis as an inverse
+    transform. It was never held against a direct sum, only its
+    integrals were, at a distance of zero. Its peak did not put two
+    copies of a volume on top of each other: the best reading of its
+    index overlapped them to 0.91 and 0.71 on two trials, where this one
+    gives 0.999 on both.
+
     Contracted in two steps so that no array of five free indices and two
     summed ones is ever built.
 
     Args:
-        integrals: What `two_centre_integrals` returned.
+        integrals: What `two_centre_integrals` returned. Those conjugate
+            the first particle; the correlation here conjugates the
+            second, so they enter conjugated.
         bandwidth: The bandwidth of the expansion.
 
     Returns:
-        ``(2B, 2B, 2B, 2B, 2B)``, indexed by ``n, h, m, h', m'``.
+        ``(2B, 2B, 2B, 2B, 2B)``, indexed by ``n, h, m, H, M``.
     """
-    integrals = jnp.asarray(integrals)
-    size = 2 * bandwidth
-    quarter = jnp.asarray(half_turn_table(bandwidth), dtype=integrals.dtype)
+    from .rotation import _phases
 
-    # d^l_{-n, h}, which in the FFT's layout is the row at -n modulo 2B.
-    index = jnp.arange(size)
-    mirrored = quarter[:, (-index) % size, :]
+    kernel = jnp.conjugate(jnp.asarray(integrals))
+    quarter = jnp.asarray(half_turn_table(bandwidth), dtype=kernel.dtype)
+    phase = jnp.asarray(_phases(bandwidth), dtype=kernel.dtype)
 
     # Sum over the second particle's degree first.
-    partial = jnp.einsum('LnH,LHM,nlmLM->nHMlm', mirrored, quarter, integrals)
+    partial = jnp.einsum('LHn,LHM,nlmLM->nlmHM', quarter, quarter, kernel)
     # Then over the first's.
-    series = jnp.einsum('lnh,lhm,nHMlm->nhmHM', quarter, quarter, partial)
-
-    sign = jnp.where(index % 2 == 0, 1.0, -1.0).astype(series.dtype)
-    return series * sign[:, None, None, None, None]
+    series = jnp.einsum('lhn,lhm,nlmHM->nhmHM', quarter, quarter, partial)
+    return (
+        series
+        * phase[None, None, :, None, None]
+        * jnp.conjugate(phase)[None, None, None, None, :]
+    )
 
 
 def correlation_5d(series: ArrayLike) -> jax.Array:
@@ -297,13 +359,59 @@ def correlation_5d(series: ArrayLike) -> jax.Array:
         series: What `series_5d` returned.
 
     Returns:
-        A real array ``(2B,) * 5``.
+        A real array ``(2B,) * 5``, indexed as `grid_to_rotations` reads
+        it.
     """
     series = jnp.asarray(series)
     size = series.shape[0]
-    values = series
-    # Every axis carries exp(+i x), so every one is an inverse transform,
-    # scaled back up by what an inverse transform divides out.
-    for axis in range(5):
-        values = jnp.fft.ifft(values, axis=axis) * size
+    # exp(-i n d), exp(+i h b), exp(-i m c), exp(-i H b'), exp(+i M c'):
+    # a minus is a forward transform, a plus an inverse one scaled back
+    # up by what it divides out.
+    values = jnp.fft.fft(series, axis=0)
+    values = jnp.fft.ifft(values, axis=1) * size
+    values = jnp.fft.fft(values, axis=2)
+    values = jnp.fft.fft(values, axis=3)
+    values = jnp.fft.ifft(values, axis=4) * size
     return values.real
+
+
+def grid_to_rotations(
+    indices: ArrayLike, bandwidth: int
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """The rotation of each body that an index of the grid stands for.
+
+    The value at an index is
+
+        sum over x of f(Q1^-1 x) * g(Q2^-1 (x - rho z)),
+
+    the first body turned by ``Q1`` and the second turned by ``Q2`` and
+    then moved by ``rho`` along ``+z``. Both rotations are read as
+    `frmony.matching.rotation.grid_to_euler` reads the three-dimensional
+    grid, which a test pins: the first body from the first three
+    components, the second from the last two with no first angle of its
+    own.
+
+    In the terms the rest of the package uses, a pair aligned as
+    ``V_i(x) = V_j(A.T @ (x - a))`` has
+
+        A = Q1.T @ Q2,        a = rho * Q1.T @ z.
+
+    Args:
+        indices: Indices ``(..., 5)`` into the grid.
+        bandwidth: The bandwidth the grid was built at.
+
+    Returns:
+        ``Q1`` and ``Q2``, each ``(..., 3, 3)``.
+    """
+    from ..geometry import euler_to_matrix
+    from .rotation import grid_to_euler
+
+    indices = np.asarray(indices)
+    if indices.shape[-1] != 5:
+        raise ValueError('An index into the grid has five components.')
+    first = euler_to_matrix(*grid_to_euler(indices[..., :3], bandwidth))
+    alone = np.concatenate(
+        (np.zeros_like(indices[..., :1]), indices[..., 3:]), axis=-1
+    )
+    second = euler_to_matrix(*grid_to_euler(alone, bandwidth))
+    return first, second

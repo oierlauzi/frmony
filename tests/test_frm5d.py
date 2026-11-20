@@ -253,3 +253,135 @@ def test_the_cost_is_what_it_says(bandwidth: int, expected: int) -> None:
 def test_the_cost_grows_as_the_fifth_power() -> None:
     assert memory_for(8) == 32 * memory_for(4)
     assert memory_for(16) == 32 * memory_for(8)
+
+
+def _blobs(rng: np.random.Generator, size: int) -> np.ndarray:
+    axis = np.arange(size) - size // 2
+    z, y, x = np.meshgrid(axis, axis, axis, indexing='ij')
+    out = np.zeros((size,) * 3)
+    for _ in range(5):
+        centre = rng.normal(size=3)
+        centre *= 0.22 * size * rng.uniform(0.4, 1.0) / np.linalg.norm(centre)
+        out += rng.uniform(0.5, 1.5) * np.exp(
+            -(
+                (x - centre[0]) ** 2
+                + (y - centre[1]) ** 2
+                + (z - centre[2]) ** 2
+            )
+            / (2 * 1.6**2)
+        )
+    return out
+
+
+def _five_dimensional(
+    first: np.ndarray, second: np.ndarray, bandwidth: int, distance: float
+) -> np.ndarray:
+    from frmony.harmonics.transform import expand, make_basis
+    from frmony.matching.frm5d import (
+        correlation_5d,
+        cylindrical_grid,
+        series_5d,
+        two_centre_integrals,
+    )
+
+    size = first.shape[-1]
+    radii = np.arange(0.5, 0.5 * size - 1.0, 1.0)
+    basis = make_basis(radii, bandwidth, size, sampling_bandwidth=2 * bandwidth)
+    grid = cylindrical_grid(float(radii[0]), float(radii[-1]), distance)
+    integrals = two_centre_integrals(
+        np.asarray(expand(first.astype(np.float32), basis)),
+        np.asarray(expand(second.astype(np.float32), basis)),
+        radii,
+        np.asarray(basis.radial),
+        distance,
+        grid,
+        bandwidth,
+    )
+    return np.asarray(correlation_5d(series_5d(integrals, bandwidth)))
+
+
+def _direct(
+    first: np.ndarray,
+    second: np.ndarray,
+    index: np.ndarray,
+    bandwidth: int,
+    distance: float,
+) -> float:
+    """The correlation an index stands for, by turning and moving."""
+    from scipy.ndimage import shift
+
+    from conftest import rotate_volume
+    from frmony.matching.frm5d import grid_to_rotations
+
+    turn_first, turn_second = grid_to_rotations(index, bandwidth)
+    moved = shift(
+        rotate_volume(second, turn_second),
+        (distance, 0.0, 0.0),
+        order=3,
+        mode='constant',
+    )
+    return float(np.sum(rotate_volume(first, turn_first) * moved))
+
+
+def test_the_grid_is_the_correlation_it_says_it_is() -> None:
+    """Held against the sum itself, at indices drawn at random.
+
+    This is the test the series went without. Its integrals were checked,
+    at a distance of zero, and the series built on them was not, and was
+    wrong. Measured with the series as it stands: a correlation of
+    0.9999 with the direct sum and a ratio of 0.97, the three in a
+    hundred being the spheres a volume is read off.
+    """
+    rng = np.random.default_rng(0)
+    size, bandwidth, distance = 24, 8, 3.0
+    first, second = _blobs(rng, size), _blobs(rng, size)
+    values = _five_dimensional(first, second, bandwidth, distance)
+
+    indices = rng.integers(0, 2 * bandwidth, size=(24, 5))
+    found = values[tuple(indices.T)]
+    wanted = np.array(
+        [
+            _direct(first, second, index, bandwidth, distance)
+            for index in indices
+        ]
+    )
+    assert np.corrcoef(found, wanted)[0, 1] > 0.995
+    assert np.dot(found, wanted) / np.dot(wanted, wanted) == pytest.approx(
+        1.0, abs=0.08
+    )
+
+
+def test_the_peak_puts_a_copy_back_on_its_original() -> None:
+    """A wrong reading of the index cannot pass this by accident.
+
+    The second volume is the first, turned and moved by a known amount,
+    so the grid has a sharp peak, and the rotations its index stands for
+    have to superimpose the two. Under the series that stood here before,
+    no reading of the index got past an overlap of 0.91.
+    """
+    from scipy.ndimage import shift
+
+    from conftest import rotate_volume
+    from frmony.matching.frm5d import grid_to_rotations
+
+    rng = np.random.default_rng(1)
+    size, bandwidth, distance = 24, 8, 3.0
+    first = _blobs(rng, size)
+    planted = rng.integers(1, 2 * bandwidth, size=5)
+    turn_first, turn_second = grid_to_rotations(planted, bandwidth)
+    # f(Q1^-1 x) = g(Q2^-1 (x - rho z)): turn f by Q1, move it back by
+    # rho, and turn what comes out by the inverse of Q2.
+    moved = shift(
+        rotate_volume(first, turn_first),
+        (-distance, 0.0, 0.0),
+        order=3,
+        mode='constant',
+    )
+    second = rotate_volume(moved, turn_second.T)
+
+    values = _five_dimensional(first, second, bandwidth, distance)
+    peak = np.array(np.unravel_index(int(values.argmax()), values.shape))
+    overlap = _direct(first, second, peak, bandwidth, distance) / np.sqrt(
+        np.sum(first**2) * np.sum(second**2)
+    )
+    assert overlap > 0.97
