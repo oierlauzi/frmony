@@ -211,6 +211,7 @@ dependencies = [
     { name = "pandas" },
     { name = "scipy" },
     { name = "starfile" },
+    { name = "tqdm" },
     { name = "vitrio" },
 ]
 
@@ -228,6 +229,7 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
     { name = "scipy-stubs" },
+    { name = "types-tqdm" },
 ]
 
 [package.metadata]
@@ -246,6 +248,8 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.11" },
     { name = "scipy-stubs", marker = "extra == 'dev'" },
     { name = "starfile", specifier = ">=0.5.2" },
+    { name = "tqdm", specifier = ">=4.66" },
+    { name = "types-tqdm", marker = "extra == 'dev'" },
     { name = "vitrio", specifier = ">=0.2" },
 ]
 provides-extras = ["cuda12", "cuda13", "dev"]
@@ -1368,6 +1372,27 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/8e/c5/83fd806f8a7c982fb4861171e6761cc1016649ffc3a7ff9cc3f9fd608419/starfile-0.5.13.tar.gz", hash = "sha256:c9562960b06558a35c12e0bd1b8a30b71c4b676733a8b9f222c8ee94a152dc15", size = 28533, upload-time = "2025-06-02T19:34:10.316Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0b/d4/a4e3e0237574058d3b901971f185a22cb4d1751151b224d4cc44b023f1fa/starfile-0.5.13-py3-none-any.whl", hash = "sha256:2a8cd876121e9183b4594442bc3bd0818964aba66da964e5b2c373984b3c0ce7", size = 10614, upload-time = "2025-06-02T19:34:07.532Z" },
+]
+
+[[package]]
+name = "tqdm"
+version = "4.70.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0d/ea/b2a5bd54b28a324dae8211928b2d730b6547500342c7e6c6dea08bd0a485/tqdm-4.70.1.tar.gz", hash = "sha256:cefd0eca11b2a37a3aee776544d4f4ae913f02688135b5556b8788dfa474afc4", size = 171846, upload-time = "2026-09-11T07:25:16.601Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a7/03/921a3d3c75785aca9ebfbfcabfbc3a1be12e2ab5265deb026d55a5a3f83e/tqdm-4.70.1-py3-none-any.whl", hash = "sha256:c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73", size = 80199, upload-time = "2026-09-11T07:25:14.599Z" },
+]
+
+[[package]]
+name = "types-tqdm"
+version = "4.70.0.20261106"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f1/c7/742d7c26986dfa2afb88f208f3439d6f7bff7270c5aec42d71623415a4a3/types_tqdm-4.70.0.20261106.tar.gz", hash = "sha256:4e0b61731624c8430e60ded705ea4f4270c37a9263d19d69946375a522ef9e79", size = 19601, upload-time = "2026-11-06T08:40:25.742Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b6/53/a581c64cc05ccbfd8077145913f63eac6b087b15129fdae583d2c6eff546/types_tqdm-4.70.0.20261106-py3-none-any.whl", hash = "sha256:4ba3eeea27ca863522c4814c5c6954b83d51bbdec8056214e0dddc132f5964d5", size = 25317, upload-time = "2026-11-06T08:40:24.81Z" },
 ]
 
 [[package]]

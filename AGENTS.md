@@ -240,8 +240,6 @@ Do not claim otherwise in documentation or commit messages.
   are not in this repository.
 - Standardizing each voxel over the particles, which is what gives the
   amplitudes any use, is not in the package.
-- The loader reads volumes one at a time. It does not overlap reads with
-  computation.
 - The memory formula in `pipeline.Design` is reasoned, not measured. What
   is measured: 10357 particles in a band of 38 fit on a 32 GB device and
   align at about half a millisecond a pair. Two runs at once do not fit,

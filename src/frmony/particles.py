@@ -17,13 +17,14 @@ from __future__ import annotations
 import functools
 import logging
 from dataclasses import dataclass
-from pathlib import Path
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 from numpy.typing import NDArray
 
+from ._progress import progress
 from ._transfers import to_device, to_host
 from .io.volumes import prepare, soft_ball
 from .io.wedge import cone_weight, relion_weight, wedge_weight
@@ -31,6 +32,11 @@ from .io.wedge import cone_weight, relion_weight, wedge_weight
 __all__ = ['Subtomograms', 'load_subtomograms', 'recentred', 'whiten']
 
 _LOGGER = logging.getLogger(__name__)
+
+_WINDOW = 128
+"""Particles read in one batch, while the batch before is prepared. Two
+batches of twelve thousand particles' worth of 64 voxel volumes and their
+weights are half a gigabyte."""
 
 _WHITEN_FLOOR = 1e-4
 """Below this fraction of a particle's largest transfer a frequency is
@@ -148,14 +154,20 @@ def whiten(
     )
 
 
+def _location(path: str) -> Any:
+    """Where vitrio finds a volume: a file, or a member of a stack."""
+    import vitrio as vio
+
+    if '@' in path:
+        return vio.ImageLocation.from_string(path)
+    return vio.ImageLocation(path)
+
+
 def _read_volume(path: str) -> NDArray[np.float32]:
     """One volume, through vitrio."""
     import vitrio as vio
 
-    location = (
-        vio.ImageLocation.from_string(path) if '@' in path else Path(path)
-    )
-    return np.asarray(vio.read(location, data_type='float32'))
+    return np.asarray(vio.read(_location(path), data_type='float32'))
 
 
 def load_subtomograms(
@@ -189,7 +201,8 @@ def load_subtomograms(
             carried with the particles and applied by `recentred`, once
             for each centre they are believed to have. None leaves the
             volumes alone.
-        batch: How many volumes to read at a time.
+        batch: Kept for the callers that pass it. The volumes are read
+            one at a time.
 
     Returns:
         The loaded `Subtomograms`.
@@ -246,30 +259,81 @@ def load_subtomograms(
 
     spectra = np.empty((len(data_paths), crop, crop, crop), dtype=np.complex64)
     weights = np.empty((len(data_paths), crop, crop, crop), dtype=np.float32)
-    for start in range(0, len(data_paths), max(batch, 1)):
-        stop = min(start + max(batch, 1), len(data_paths))
-        for index in range(start, stop):
-            volume = first if index == 0 else _read_volume(data_paths[index])
-            if volume.shape != first.shape:
-                raise ValueError(
-                    f'{data_paths[index]} has shape {volume.shape}, while '
-                    f'{data_paths[0]} has {first.shape}.'
+    # Read a window at a time with vitrio, which runs many reads at once,
+    # and the next window read while this one is prepared. Read one at a
+    # time, which is what this did, twelve thousand particles on a ZFS
+    # pool took a quarter of an hour and every second of it was spent
+    # waiting on the disk: 65 to 70 milliseconds a particle, against 10 to
+    # 13 for a batch. Preparing a particle then costs about as much again,
+    # and overlapping the two hides one behind the other.
+    import vitrio as vio
+
+    weight_shape = (
+        None
+        if weight_paths is None or shared is not None
+        else _read_volume(weight_paths[0]).shape
+    )
+    loader = vio.loader()
+
+    def start(
+        begin: int, end: int
+    ) -> tuple[Any, NDArray[np.float32], NDArray[np.float32] | None]:
+        volumes = np.empty((end - begin, *first.shape), dtype=np.float32)
+        reads = [
+            vio.read_batch_async(
+                loader, volumes, [_location(p) for p in data_paths[begin:end]]
+            )
+        ]
+        stored = None
+        if weight_shape is not None:
+            assert weight_paths is not None
+            stored = np.empty((end - begin, *weight_shape), dtype=np.float32)
+            reads.append(
+                vio.read_batch_async(
+                    loader,
+                    stored,
+                    [_location(p) for p in weight_paths[begin:end]],
                 )
+            )
+        return reads, volumes, stored
+
+    def finish(begin: int, reads: Any) -> None:
+        try:
+            for read in reads:
+                read.get()
+        except Exception as error:
+            raise ValueError(
+                f'Reading the particles from {data_paths[begin]} on failed: '
+                f'{error} Every volume has to be the size of the first, '
+                f'{first.shape}.'
+            ) from error
+
+    window = _WINDOW
+    bar = progress(range(len(data_paths)), 'Reading particles', unit='particle')
+    pending = start(0, min(window, len(data_paths)))
+    for begin in range(0, len(data_paths), window):
+        end = min(begin + window, len(data_paths))
+        reads, volumes, stored = pending
+        finish(begin, reads)
+        if end < len(data_paths):
+            pending = start(end, min(end + window, len(data_paths)))
+        for offset, index in enumerate(range(begin, end)):
             if shared is not None:
                 weight = shared
             else:
-                assert weight_paths is not None
-                weight = relion_weight(
-                    _read_volume(weight_paths[index]), weight_transform
-                )
-                if weight.shape != volume.shape:
+                assert stored is not None
+                weight = relion_weight(stored[offset], weight_transform)
+                if weight.shape != first.shape:
+                    assert weight_paths is not None
                     raise ValueError(
                         f'{weight_paths[index]} describes a {weight.shape} '
-                        f'volume, not a {volume.shape} one.'
+                        f'volume, not a {first.shape} one.'
                     )
             spectra[index], weights[index] = whiten(
-                *prepare(volume, weight, crop=crop)
+                *prepare(volumes[offset], weight, crop=crop)
             )
+            bar.update(1)
+    bar.close()
 
     return Subtomograms(
         data=spectra,

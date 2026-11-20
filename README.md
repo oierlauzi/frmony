@@ -206,9 +206,6 @@ together, and they share whatever the tomograms have in common. On the
 data above, particles given no orientation at all still correlated to
 36 A.
 
-**Volumes are read one at a time.** The loader does not yet overlap reads
-with computation.
-
 ## What is here
 
 | Module | |

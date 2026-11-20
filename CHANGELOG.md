@@ -42,8 +42,15 @@ The first run on real data, EMPIAR-10304.
 - `--max-shift` is how far apart two particles' centres may be, and with
   phases it is how far rotations and shifts are searched together.
 
+- Reading the particles waited on the disk for one file at a time, a
+  quarter of an hour for twelve thousand on a ZFS pool, with nothing
+  printed. They are read in batches through vitrio, the next while the
+  last is prepared, in two minutes.
+
 ### Added
 
+- Progress bars for reading the particles and for aligning the pairs,
+  shown with `--verbose`.
 - `Design.phases` and `--phases`, on by default, which keep the phases in
   the rotational search. Real subtomograms needed it. `--no-phases` goes
   back to amplitudes.

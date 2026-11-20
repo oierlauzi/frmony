@@ -18,6 +18,7 @@ which is what the synchronization expects of a pair.
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 
 import jax
@@ -26,6 +27,7 @@ import numpy as np
 from jax.typing import ArrayLike
 from numpy.typing import NDArray
 
+from .._progress import progress
 from .._transfers import to_device
 from ..harmonics.shells import sample_shells
 from ..harmonics.transform import Basis, expand_shells
@@ -140,6 +142,13 @@ class Joint:
     spacing: float
     """How far apart they are, and so how far from one the search over
     shifts has to look."""
+
+
+jax.tree_util.register_dataclass(
+    Joint,
+    data_fields=['coarse', 'fine', 'lattice'],
+    meta_fields=['spacing'],
+)
 
 
 def lattice_spacing(size: int, outer: float) -> float:
@@ -531,8 +540,65 @@ def align_pairs(
     batched = jax.tree.map(to_device, expansions)
     if band is not None:
         band = to_device(band)
-    first_index = jnp.asarray(left)
-    second_index = jnp.asarray(right)
+    pairs = np.stack(
+        (np.asarray(left, dtype=np.int32), np.asarray(right, dtype=np.int32)),
+        axis=1,
+    )
+    count = len(pairs)
+    batch = max(batch, 1)
+
+    # The pairs go to the device a chunk at a time, so that a run can say
+    # how far it has got. A chunk is a hundredth of them, a whole number
+    # of batches and never fewer than sixty-four, which is large enough
+    # that handing them over costs nothing measurable. Every chunk is
+    # the same size, the last padded with its own last pair, so the
+    # program is compiled once.
+    chunk = max(-(-count // 100), 64 * batch)
+    chunk = min(-(-chunk // batch) * batch, -(-count // batch) * batch)
+    chunks = -(-count // chunk)
+    padded = np.concatenate(
+        (pairs, np.repeat(pairs[-1:], chunks * chunk - count, axis=0))
+    ).reshape(chunks, chunk, 2)
+
+    pieces = []
+    for indices in progress(
+        padded, 'Aligning pairs', total=chunks, unit='pair', scale=chunk
+    ):
+        piece = _align_chunk(
+            volumes,
+            weights,
+            batched,
+            to_device(indices),
+            settings,
+            band,
+            joint,
+            batch,
+        )
+        # Waited on, or the bar would only say how much was dispatched.
+        piece.score.block_until_ready()
+        pieces.append(piece)
+    aligned: Alignment = jax.tree.map(
+        lambda *leaves: jnp.concatenate(leaves)[:count], *pieces
+    )
+    return aligned
+
+
+@functools.partial(jax.jit, static_argnames=('settings', 'batch'))
+def _align_chunk(
+    volumes: jax.Array,
+    weights: jax.Array,
+    expansions: Expansion,
+    pairs: jax.Array,
+    settings: Settings,
+    band: jax.Array | None,
+    joint: Joint | None,
+    batch: int,
+) -> Alignment:
+    """Align a chunk of pairs, ``(pairs, 2)`` indices into the particles.
+
+    Everything is an argument, and nothing is closed over. Closed over,
+    the particles would be folded into the program as constants.
+    """
 
     def one(indices: jax.Array) -> Alignment:
         first, second = indices[0], indices[1]
@@ -541,13 +607,12 @@ def align_pairs(
             weights[first],
             volumes[second],
             weights[second],
-            jax.tree.map(lambda leaf: leaf[first], batched),
-            jax.tree.map(lambda leaf: leaf[second], batched),
+            jax.tree.map(lambda leaf: leaf[first], expansions),
+            jax.tree.map(lambda leaf: leaf[second], expansions),
             settings,
             band,
             joint,
         )
 
-    pairs = jnp.stack((first_index, second_index), axis=1)
-    aligned: Alignment = jax.lax.map(one, pairs, batch_size=max(batch, 1))
+    aligned: Alignment = jax.lax.map(one, pairs, batch_size=batch)
     return aligned
