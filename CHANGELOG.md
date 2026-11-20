@@ -38,3 +38,8 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
   frequencies, which carry a particle's mass but not its orientation, took
   a median pairwise error from eight degrees to three and removed every
   catastrophic failure on the simulation it was measured on.
+- `synchronization`, which turns the pairwise measurements into one set of
+  orientations by a generalized power method, and then into centres by
+  linear least squares. Symmetry is handled by snapping each measurement
+  onto the coset member nearest the current estimate, and outliers by their
+  residual measured modulo the group.

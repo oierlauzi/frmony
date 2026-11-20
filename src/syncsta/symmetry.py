@@ -35,10 +35,11 @@ import re
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from .geometry import rotation_angle
+from .geometry import project_to_rotation, rotation_angle
 
 __all__ = [
     'detect_symmetry',
+    'estimate_group',
     'point_group',
     'snap_to_symmetry',
     'symmetry_order',
@@ -374,3 +375,81 @@ def detect_symmetry(
         if scores[name] >= best - 0.02:
             return name, scores
     return 'C1', scores
+
+
+def estimate_group(
+    residuals: ArrayLike, order: int, tolerance: float = math.radians(25.0)
+) -> NDArray[np.float64]:
+    """The group the residuals of a synchronization actually fall on.
+
+    A synchronization fixes the orientations only up to one global
+    rotation ``U``, and a point group acts in the frame of the particle.
+    So the group present in the estimated frame is ``U.T @ G @ U``, which
+    is conjugate to the named group but not equal to it: its axes point
+    wherever ``U`` left them. Snapping against the named group instead
+    takes a perfect solution apart, which is a confusing way to fail,
+    because the orientations were right before the step meant to improve
+    them.
+
+    Nothing here needs to know ``U``. Once the orientations are roughly
+    right the residuals ``Q_i.T @ A_ij @ Q_j`` are the elements of that
+    conjugated group, so it can simply be read off them.
+
+    Greedy clustering: take the densest residual not yet accounted for,
+    average what sits near it, and repeat until the group is full or
+    nothing is left.
+
+    Args:
+        residuals: Rotations ``(pairs, 3, 3)``, the measurements seen
+            through the current orientations.
+        order: How many elements the group has. One returns the identity
+            alone, which is the answer for a particle with no symmetry.
+        tolerance: How close two residuals must be to be the same element
+            [rad].
+
+    Returns:
+        Rotations ``(found, 3, 3)`` with the identity first, and at most
+        ``order`` of them. Fewer means the residuals did not support more,
+        which is itself worth knowing.
+    """
+    residuals = np.asarray(residuals, dtype=np.float64)
+    if order < 1:
+        raise ValueError(f'A group has at least one element, not {order}.')
+    identity = np.eye(3)
+    if order == 1 or len(residuals) == 0:
+        return identity[None]
+
+    found = [identity]
+    unexplained = residuals
+    while len(found) < order and len(unexplained) > 0:
+        # Drop what the elements found so far already explain.
+        known = np.stack(found)
+        distance = np.min(
+            [
+                rotation_angle(np.swapaxes(unexplained, -2, -1) @ element)
+                for element in known
+            ],
+            axis=0,
+        )
+        unexplained = unexplained[distance > tolerance]
+        if len(unexplained) == 0:
+            break
+
+        # The densest of what is left, by how many sit near it.
+        sample = unexplained
+        if len(sample) > 512:
+            sample = sample[:: max(len(sample) // 512, 1)]
+        spread = np.stack(
+            [
+                rotation_angle(np.swapaxes(unexplained, -2, -1) @ candidate)
+                for candidate in sample
+            ]
+        )
+        near = spread <= tolerance
+        densest = int(np.argmax(near.sum(axis=1)))
+        members = unexplained[near[densest]]
+        if len(members) == 0:
+            break
+        found.append(project_to_rotation(members.mean(axis=0)))
+
+    return np.stack(found)
