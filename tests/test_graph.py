@@ -5,7 +5,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from frmony.graph import build_pairs, is_connected, spanning_tree
+from frmony.graph import (
+    bridges,
+    build_pairs,
+    is_connected,
+    spanning_tree,
+)
 
 
 @pytest.fixture
@@ -120,3 +125,54 @@ def test_spanning_tree_of_a_broken_graph_is_a_forest() -> None:
 
     tree = spanning_tree(4, left, right, weights)
     assert len(tree) == 2  # two pieces, so one edge short of a tree
+
+
+def test_bridges_finds_a_bottleneck() -> None:
+    """A connected graph is not enough.
+
+    Two groups held together by a single pair come out in frames with no
+    real relation, while `is_connected` says the graph is fine.
+    """
+    left, right = [], []
+    for first in range(0, 9):
+        for second in range(first + 1, 10):
+            left.append(first)
+            right.append(second)
+    for first in range(10, 19):
+        for second in range(first + 1, 20):
+            left.append(first)
+            right.append(second)
+    left.append(5)
+    right.append(15)
+    left, right = np.array(left), np.array(right)
+
+    assert is_connected(20, left, right)
+    found = bridges(20, left, right)
+    assert len(found) == 1
+    assert (int(left[found[0]]), int(right[found[0]])) == (5, 15)
+
+
+def test_every_edge_of_a_chain_is_a_bridge() -> None:
+    left, right = np.arange(0, 9), np.arange(1, 10)
+    assert len(bridges(10, left, right)) == 9
+
+
+def test_a_cycle_has_no_bridges() -> None:
+    left = np.arange(10)
+    right = (left + 1) % 10
+    assert len(bridges(10, left, right)) == 0
+
+
+@pytest.mark.parametrize(('count', 'partners'), [(50, 8), (200, 16)])
+def test_the_graphs_this_builds_have_no_bottlenecks(
+    rng: np.random.Generator, count: int, partners: int
+) -> None:
+    """The reason the default is a ring of jumps plus random pairs."""
+    left, right = build_pairs(count, partners, rng)
+    assert len(bridges(count, left, right)) == 0
+
+
+def test_bridges_of_a_broken_graph_are_per_piece() -> None:
+    left = np.array([0, 2])
+    right = np.array([1, 3])
+    assert sorted(bridges(4, left, right).tolist()) == [0, 1]

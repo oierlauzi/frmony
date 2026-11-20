@@ -54,7 +54,6 @@ def average(
     rotations: ArrayLike,
     shifts: ArrayLike,
     epsilon: float = 1e-3,
-    batch: int = 16,
 ) -> tuple[jax.Array, jax.Array]:
     """The structure the aligned particles agree on.
 
@@ -67,7 +66,6 @@ def average(
         epsilon: Added to the denominator, as a fraction of its largest
             value, so that frequencies nobody measured stay empty instead
             of being amplified out of nothing.
-        batch: How many particles to turn at a time.
 
     Returns:
         The structure's centred spectrum and the total weight behind each
@@ -106,7 +104,6 @@ def average(
     (top, bottom), _ = jax.lax.scan(
         accumulate, start, (data, weight, rotations, shifts)
     )
-    del batch
     floor = epsilon * jnp.maximum(jnp.max(bottom), 1e-20)
     return top / (bottom + floor), bottom
 

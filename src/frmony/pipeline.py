@@ -21,7 +21,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .averaging import average, fourier_shell_correlation, resolution_at
-from .graph import build_pairs, is_connected
+from .graph import bridges, build_pairs, is_connected
 from .harmonics.shells import band_radii
 from .harmonics.transform import make_basis
 from .matching.correlation import expand_particle
@@ -262,6 +262,25 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
     orientations = synchronized.orientations
 
     kept = synchronized.kept
+    if not is_connected(count, left[kept], right[kept]):
+        _LOGGER.warning(
+            'Rejecting outliers left the particles in more than one piece. '
+            'Each piece has its own frame and nothing relates them, so the '
+            'average is not meaningful. Ask for more partners, or raise '
+            'the rejection threshold.'
+        )
+    else:
+        weak = bridges(count, left[kept], right[kept])
+        if len(weak):
+            _LOGGER.warning(
+                '%d of the surviving pairs are the only thing holding two '
+                'groups of particles together. Everything those groups say '
+                'about each other rests on one measurement apiece, which '
+                'nothing can contradict, so it may be wrong without any '
+                'residual showing it. Ask for more partners.',
+                len(weak),
+            )
+
     centres, _ = synchronize_shifts(
         count,
         left[kept],

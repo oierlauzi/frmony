@@ -197,8 +197,19 @@ def write_star(
 ) -> None:
     """Write the orientations and centres back out, beside what came in.
 
-    The incoming columns are kept, so the file can be handed to RELION or
-    read back here without losing anything the alignment did not touch.
+    Every incoming column is kept, so nothing the alignment did not touch
+    is lost, and reading the result back in here round-trips.
+
+    What has *not* been checked is the half of the convention that lives
+    in RELION. The angles are this package's orientations written as ZYZ
+    Euler angles and the origins are its centres in angstroms, which is
+    the natural reading of those columns; whether RELION takes an
+    orientation to mean this one or its inverse, and whether it adds or
+    subtracts the origin, has not been tested against RELION itself,
+    because that needs RELION and a real dataset. Both would be silent if
+    wrong: the map would come out wrong rather than the program failing.
+    Check it against a refinement of the same particles before trusting
+    the output downstream.
 
     Args:
         path: Where to write.

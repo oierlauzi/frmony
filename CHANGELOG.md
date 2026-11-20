@@ -63,3 +63,7 @@ First release.
   radial overlap. Which rotations a grid index stands for is not yet
   settled, so this is not yet an engine `pairwise` can dispatch to; the
   module says so.
+- `graph.bridges`, and a warning when the pairs that survive rejection
+  include one. A connected graph is not enough: two groups held together
+  by a single pair come out in unrelated frames while every residual looks
+  small and `is_connected` says the graph is fine.
