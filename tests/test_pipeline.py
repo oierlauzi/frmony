@@ -14,7 +14,7 @@ from frmony.averaging import (
     resolution_at,
 )
 from frmony.geometry import relative_angle
-from frmony.particles import Subtomograms, load_subtomograms
+from frmony.particles import Subtomograms, load_subtomograms, recentred
 from frmony.pipeline import Design, Result, run
 
 
@@ -366,3 +366,87 @@ def test_the_command_line_runs(
     assert 'rlnOriginXAngst' in particles.columns
     # What came in survived.
     assert 'rlnCenteredCoordinateXAngst' in particles.columns
+
+
+# ------------------------------------------------- particles off their centres
+
+
+def test_recentring_undoes_a_displacement(rng: np.random.Generator) -> None:
+    # The same structure and orientations, simulated at their centres and
+    # three voxels off them. Bringing the second set back has to give the
+    # first, where both were measured.
+    count, size = 3, 24
+    centred = simulate(np.random.default_rng(7), count, size=size, tilt=60.0)
+    moved = simulate(
+        np.random.default_rng(7), count, size=size, tilt=60.0, shift=3.0
+    )
+    assert np.abs(moved.shifts).max() > 0
+    subtomograms = Subtomograms(
+        data=moved.data, weight=moved.weight, pixel_size=4.0, box=size
+    )
+    back, weight = recentred(subtomograms, moved.shifts)
+    np.testing.assert_array_equal(np.asarray(weight), moved.weight)
+    np.testing.assert_allclose(
+        np.asarray(back), centred.data, atol=2e-3 * np.abs(centred.data).max()
+    )
+
+
+def test_a_mask_follows_the_centre_it_is_given(
+    rng: np.random.Generator,
+) -> None:
+    # A mask is carried, not applied on loading, so that it lands on the
+    # particle and not on the middle of the box. With none and no centres
+    # the particles come through untouched.
+    simulation, subtomograms = _subtomograms(rng, 2, size=24, tilt=60.0)
+    untouched, _ = recentred(subtomograms)
+    np.testing.assert_array_equal(np.asarray(untouched), simulation.data)
+
+    import dataclasses
+
+    masked = dataclasses.replace(subtomograms, mask_radius=6.0)
+    data, _ = recentred(masked)
+    assert np.all(np.isfinite(np.asarray(data)))
+    assert not np.allclose(np.asarray(data), simulation.data)
+    assert np.all(np.asarray(data)[simulation.weight == 0.0] == 0.0)
+
+
+@pytest.mark.slow
+def test_particles_off_their_centres_are_brought_back(
+    rng: np.random.Generator,
+) -> None:
+    """The whole of it on particles two voxels from where they should be.
+
+    Rotations and shifts are searched at once, the centres are
+    synchronized, and the particles are brought back for a second pass.
+    Measured, with no noise: orientations to a median of 2.3 degrees and
+    no pair past 4.5, and every centre within a quarter of a voxel.
+    """
+    count = 10
+    simulation, subtomograms = _subtomograms(
+        rng, count, size=32, tilt=60.0, shift=2.0
+    )
+    result = run(
+        subtomograms,
+        Design(
+            partners=9,
+            bandwidth=16,
+            max_shift=6.0,
+            phases=True,
+            passes=2,
+        ),
+    )
+    errors = _pair_errors(result, simulation.rotations)
+    print(
+        'MEASURED rotation', np.round(np.percentile(errors, [50, 90, 100]), 1)
+    )
+
+    # The centres are found up to one offset in the frame of the
+    # particle, t_i -> t_i - Q_i d, which is taken out before comparing.
+    design = np.concatenate(list(result.orientations))
+    difference = result.shifts - simulation.shifts
+    offset, *_ = np.linalg.lstsq(design, difference.reshape(-1), rcond=None)
+    left_over = np.linalg.norm(
+        difference - result.orientations @ offset, axis=1
+    )
+    assert np.median(errors) < 10.0
+    assert np.median(left_over) < 1.0

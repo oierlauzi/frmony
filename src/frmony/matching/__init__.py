@@ -18,10 +18,14 @@ from .correlation import Expansion, expand_particle, rotation_score
 from .frm5d import correlation_5d, series_5d, two_centre_integrals
 from .pairwise import (
     Alignment,
+    Joint,
     Settings,
     align_pair,
     align_pairs,
     candidate_rotations,
+    lattice_spacing,
+    shift_lattice,
+    truncate,
 )
 from .peaks import refine_peak, top_peaks
 from .refine import refine_alignment, score_at
@@ -42,6 +46,7 @@ from .translation import (
 __all__ = [
     'Alignment',
     'Expansion',
+    'Joint',
     'Settings',
     'align_pair',
     'align_pairs',
@@ -52,6 +57,7 @@ __all__ = [
     'frequency_grid',
     'grid_angles',
     'grid_to_euler',
+    'lattice_spacing',
     'radial_overlap',
     'refine_alignment',
     'refine_peak',
@@ -61,7 +67,9 @@ __all__ = [
     'score_at',
     'series_5d',
     'shift_correlation',
+    'shift_lattice',
     'shift_of_index',
     'top_peaks',
+    'truncate',
     'two_centre_integrals',
 ]

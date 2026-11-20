@@ -104,8 +104,11 @@ def _add_run(commands: Any, shared: argparse.ArgumentParser) -> None:
         '--max-shift',
         type=float,
         default=6.0,
-        help='Largest shift considered, in voxels of the analysis band '
-        '(default: %(default)s).',
+        help='How far apart the centres of two particles may be, in '
+        'voxels of the analysis band (default: %(default)s). With '
+        '--phases, rotations and shifts are searched together out to '
+        'this distance. Make it what the picking warrants and no more: '
+        'the further the search reaches, the fewer pairs it aligns.',
     )
     parser.add_argument(
         '--band',
@@ -177,6 +180,14 @@ def _add_run(commands: Any, shared: argparse.ArgumentParser) -> None:
         '--seed', type=int, default=0, help='Which pairs get chosen.'
     )
     parser.add_argument(
+        '--passes',
+        type=_count,
+        default=1,
+        help='Times to align, synchronize and bring the particles back '
+        'to the centres found (default: %(default)s). Particles that are '
+        'off centre need more than one.',
+    )
+    parser.add_argument(
         '--phases',
         action='store_true',
         help='Keep the phases in the rotational search. It then needs the '
@@ -217,6 +228,7 @@ def _run_pipeline(
     batch: int,
     seed: int,
     refine: bool,
+    passes: int,
     phases: bool,
     device: str | None,
 ) -> None:
@@ -265,6 +277,7 @@ def _run_pipeline(
             batch=batch,
             seed=seed,
             refine=refine,
+            passes=passes,
             phases=phases,
         )
         result = run(subtomograms, design)

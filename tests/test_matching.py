@@ -11,10 +11,14 @@ from frmony.harmonics.shells import band_radii
 from frmony.harmonics.transform import make_basis
 from frmony.matching.correlation import expand_particle, rotation_score
 from frmony.matching.pairwise import (
+    Joint,
     Settings,
     align_pair,
     align_pairs,
     candidate_rotations,
+    lattice_spacing,
+    shift_lattice,
+    truncate,
 )
 from frmony.matching.peaks import refine_peak, top_peaks
 from frmony.matching.rotation import grid_to_euler
@@ -507,3 +511,136 @@ def test_the_alignment_satisfies_the_relation(
     turned = np.corrcoef(first.ravel(), brought.ravel())[0, 1]
     assert turned > straight
     assert turned > 0.5
+
+
+# ------------------------------------------------ rotations and shifts at once
+
+
+def test_a_lattice_of_shifts_fills_its_ball() -> None:
+    reach, spacing = 5.0, 1.5
+    lattice = shift_lattice(reach, spacing)
+
+    np.testing.assert_array_equal(lattice[0], 0.0)
+    assert np.linalg.norm(lattice, axis=1).max() <= reach + 1e-9
+    assert len(np.unique(np.round(lattice, 6), axis=0)) == len(lattice)
+
+    # A body-centred lattice of edge h leaves no point further than
+    # sqrt(5) / 4 of h from one of its own. Checked away from the edge of
+    # the ball, where the lattice has been cut.
+    rng = np.random.default_rng(0)
+    points = rng.normal(size=(500, 3))
+    points *= (
+        (reach - spacing)
+        * rng.uniform(0, 1, (500, 1)) ** (1 / 3)
+        / np.linalg.norm(points, axis=1, keepdims=True)
+    )
+    nearest = np.linalg.norm(points[:, None] - lattice[None], axis=-1).min(
+        axis=1
+    )
+    assert nearest.max() <= np.sqrt(5.0) / 4.0 * spacing + 1e-9
+
+
+def test_no_reach_is_one_trial() -> None:
+    np.testing.assert_array_equal(shift_lattice(0.0, 1.5), np.zeros((1, 3)))
+    with pytest.raises(ValueError, match='spacing'):
+        shift_lattice(3.0, 0.0)
+
+
+def test_truncating_is_expanding_at_a_lower_bandwidth(
+    rng: np.random.Generator,
+) -> None:
+    # The degrees below the lower bandwidth are the same numbers at
+    # either, as long as the spheres are sampled alike, so the joint
+    # search can cut what it needs out of the expansions it has.
+    from frmony.harmonics.transform import expand
+
+    simulation = simulate(rng, 1, size=SIZE, tilt=60.0)
+    radii = band_radii(SIZE)
+    high = make_basis(radii, 16, SIZE, sampling_bandwidth=32)
+    low = make_basis(radii, 8, SIZE, sampling_bandwidth=32)
+    cut = np.asarray(truncate(expand(simulation.data[0], high), 8))
+    made = np.asarray(expand(simulation.data[0], low))
+    assert cut.shape == made.shape
+    np.testing.assert_allclose(cut, made, atol=1e-4 * np.abs(made).max())
+
+    with pytest.raises(ValueError, match='bandwidth'):
+        truncate(expand(simulation.data[0], low), 16)
+
+
+def test_a_displaced_pair_needs_its_shift_searched_too(
+    rng: np.random.Generator,
+) -> None:
+    """Rotations alone cannot see a pair that is off centre.
+
+    With phases the rotational score is the correlation at no shift, and
+    two particles three voxels from their centres do not correlate
+    there. Searched over a lattice of shifts at once they do. Measured on
+    this simulation, with no noise: the ten pairs came out between 12
+    and 146 degrees off with rotations alone, a median of 88, and
+    between 2 and 13 with the shifts, every shift within a voxel and a
+    half.
+    """
+    count, bandwidth = 5, 16
+    simulation = simulate(rng, count, size=SIZE, tilt=60.0, shift=3.0)
+    radii = band_radii(SIZE)
+    fine = make_basis(radii, bandwidth, SIZE, sampling_bandwidth=2 * bandwidth)
+    coarse = make_basis(
+        radii, bandwidth // 2, SIZE, sampling_bandwidth=bandwidth
+    )
+    spacing = lattice_spacing(SIZE, float(radii[-1]))
+    joint = Joint(
+        coarse=coarse,
+        fine=fine,
+        lattice=np.asarray(shift_lattice(8.0, spacing), dtype=np.float32),
+        spacing=spacing,
+    )
+    settings = Settings(bandwidth=bandwidth, max_shift=8.0, phases=True)
+    offsets = np.arange(SIZE) - SIZE // 2
+    distance = np.sqrt(
+        offsets[:, None, None] ** 2
+        + offsets[None, :, None] ** 2
+        + offsets[None, None, :] ** 2
+    )
+    band = ((distance >= radii[0]) & (distance <= radii[-1] + 0.5)).astype(
+        np.float32
+    )
+    expansions = [
+        expand_particle(simulation.data[i], simulation.weight[i], fine, True)
+        for i in range(count)
+    ]
+
+    errors: dict[bool, list[float]] = {False: [], True: []}
+    misses = []
+    for first in range(count):
+        for second in range(first + 1, count):
+            truth = simulation.rotations[first] @ simulation.rotations[second].T
+            offset = (
+                simulation.shifts[first] - truth @ simulation.shifts[second]
+            )
+            for together in (False, True):
+                found = align_pair(
+                    simulation.data[first],
+                    simulation.weight[first],
+                    simulation.data[second],
+                    simulation.weight[second],
+                    expansions[first],
+                    expansions[second],
+                    settings,
+                    band,
+                    joint if together else None,
+                )
+                errors[together].append(
+                    float(
+                        np.degrees(
+                            relative_angle(truth, np.asarray(found.rotation))
+                        )
+                    )
+                )
+                if together:
+                    misses.append(
+                        float(np.linalg.norm(np.asarray(found.shift) - offset))
+                    )
+
+    assert np.median(errors[False]) > 45.0
+    assert np.max(errors[True]) < 20.0
+    assert np.max(misses) < 2.5

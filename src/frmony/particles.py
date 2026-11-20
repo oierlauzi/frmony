@@ -18,13 +18,16 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+import jax
+import jax.numpy as jnp
 import numpy as np
 from numpy.typing import NDArray
 
+from ._transfers import to_device
 from .io.volumes import prepare, soft_ball
 from .io.wedge import cone_weight, relion_weight, wedge_weight
 
-__all__ = ['Subtomograms', 'load_subtomograms', 'whiten']
+__all__ = ['Subtomograms', 'load_subtomograms', 'recentred', 'whiten']
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,6 +52,11 @@ class Subtomograms:
     """Of the original box [A]."""
     box: int
     """Extent of the original box, before cropping."""
+    mask_radius: float | None = None
+    """Radius of a soft real-space mask, in voxels of the original box.
+    Kept and not applied: a mask belongs on the particle, and where the
+    particle is in its box is one of the things being found. `recentred`
+    applies it."""
 
     def __len__(self) -> int:
         return len(self.data)
@@ -176,8 +184,10 @@ def load_subtomograms(
         weight_transform: How to read a RELION weight as a transfer; see
             `frmony.io.wedge.relion_weight`. As it stands by default,
             which is what the file is.
-        mask_radius: Radius of a soft real-space mask [voxels]. None
-            leaves the volumes alone.
+        mask_radius: Radius of a soft real-space mask [voxels]. It is
+            carried with the particles and applied by `recentred`, once
+            for each centre they are believed to have. None leaves the
+            volumes alone.
         batch: How many volumes to read at a time.
 
     Returns:
@@ -226,7 +236,6 @@ def load_subtomograms(
         crop,
     )
 
-    mask = None if mask_radius is None else soft_ball(box, mask_radius)
     if tilt is not None:
         shared: NDArray[np.float32] | None = wedge_weight(box, tilt)
     elif cone is not None:
@@ -258,9 +267,83 @@ def load_subtomograms(
                         f'volume, not a {volume.shape} one.'
                     )
             spectra[index], weights[index] = whiten(
-                *prepare(volume, weight, crop=crop, mask=mask)
+                *prepare(volume, weight, crop=crop)
             )
 
     return Subtomograms(
-        data=spectra, weight=weights, pixel_size=pixel_size, box=box
+        data=spectra,
+        weight=weights,
+        pixel_size=pixel_size,
+        box=box,
+        mask_radius=mask_radius,
     )
+
+
+def recentred(
+    subtomograms: Subtomograms,
+    centres: NDArray[np.float64] | None = None,
+    batch: int = 32,
+) -> tuple[jax.Array, jax.Array]:
+    """The particles brought back to their centres and masked there.
+
+    Each spectrum is taken back to what was stored, moved, masked in real
+    space and whitened again, in that order: a mask multiplies a volume
+    and so mixes the frequencies of its spectrum, which the whitening
+    then has to see. With no centres and no mask nothing is done to
+    them, and they cross to the device as they are.
+
+    Args:
+        subtomograms: What `load_subtomograms` built.
+        centres: Where each particle is believed to be, ``(particles,
+            3)`` in voxels of the band and ordered ``(x, y, z)``. Nothing
+            if not given.
+        batch: How many particles to work on at once.
+
+    Returns:
+        The spectra and their weights, on the device.
+    """
+    data = to_device(subtomograms.data)
+    weight = to_device(subtomograms.weight)
+    if subtomograms.mask_radius is None and centres is None:
+        return data, weight
+
+    size = subtomograms.band
+    moves = to_device(
+        np.zeros((len(subtomograms), 3)) if centres is None else centres,
+        dtype=jnp.float32,
+    )
+    axis = (jnp.arange(size) - size // 2) / size
+    middle = size // 2
+    if subtomograms.mask_radius is None:
+        mask = None
+    else:
+        mask = to_device(
+            soft_ball(size, subtomograms.mask_radius / subtomograms.scale)
+        )
+
+    def one(inputs: tuple[jax.Array, jax.Array, jax.Array]) -> jax.Array:
+        spectrum, amplitude, move = inputs
+        # exp(+2 pi i k . c) moves a volume back by c.
+        ramp = jnp.exp(
+            2j
+            * jnp.pi
+            * (
+                axis[:, None, None] * move[2]
+                + axis[None, :, None] * move[1]
+                + axis[None, None, :] * move[0]
+            )
+        )
+        stored = spectrum * amplitude * ramp
+        if mask is not None:
+            volume = jnp.fft.fftshift(jnp.fft.ifftn(jnp.fft.ifftshift(stored)))
+            stored = jnp.fft.fftshift(
+                jnp.fft.fftn(jnp.fft.ifftshift(volume.real * mask))
+            )
+            stored = stored.at[middle, middle, middle].set(0.0)
+        measured = amplitude > 0.0
+        return jnp.where(
+            measured, stored / jnp.where(measured, amplitude, 1.0), 0.0
+        ).astype(jnp.complex64)
+
+    moved = jax.lax.map(one, (data, weight, moves), batch_size=max(batch, 1))
+    return moved, weight

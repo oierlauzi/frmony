@@ -27,9 +27,15 @@ from .graph import bridges, build_pairs, is_connected
 from .harmonics.shells import band_radii
 from .harmonics.transform import make_basis
 from .matching.correlation import expand_particle
-from .matching.pairwise import Settings, align_pairs
+from .matching.pairwise import (
+    Joint,
+    Settings,
+    align_pairs,
+    lattice_spacing,
+    shift_lattice,
+)
 from .matching.refine import refine_alignment
-from .particles import Subtomograms
+from .particles import Subtomograms, recentred
 from .symmetry import detect_symmetry
 from .synchronization.rotations import synchronize_rotations
 from .synchronization.translations import synchronize_shifts
@@ -54,7 +60,12 @@ class Design:
     """Rotations carried from the first stage of a pairwise alignment into
     the second."""
     max_shift: float = 6.0
-    """Largest shift considered, in voxels of the cropped band."""
+    """How far apart the centres of two particles may be, in voxels of
+    the cropped band. With the phases kept, rotations and shifts are
+    searched at once out to this distance, and the further it reaches
+    the more a pair has to stand out, so it should be what the picking
+    warrants and no more: on centred particles a reach of nothing
+    aligned 40 pairs in a hundred and a reach of five voxels 22."""
     lowest: float = 0.125
     """Innermost sphere of the expansion, as a fraction of the box. The
     frequencies below it carry a particle's mass rather than its
@@ -83,6 +94,13 @@ class Design:
     refine: bool = False
     """Polish each pair against the score itself after the grid search.
     Off by default; `frmony.matching.refine` says why."""
+    passes: int = 1
+    """Times to align, synchronize and bring the particles back to the
+    centres found. One pass leaves them where they were picked. A pair
+    of particles that are off centre is harder to align than a pair that
+    is not, so the later passes align more of them: on EMPIAR-10304,
+    with particles thirty angstroms off, 59 in a hundred came out within
+    fifteen degrees after one pass and 73 after three."""
     phases: bool = False
     """Keep the phases in the first, rotational stage. It then needs the
     particles roughly centred, and finds rotations that the amplitudes
@@ -94,6 +112,8 @@ class Design:
     def __post_init__(self) -> None:
         if self.partners < 1:
             raise ValueError('Each particle needs at least one partner.')
+        if self.passes < 1:
+            raise ValueError('There is at least one pass.')
         if not 0.0 <= self.lowest < 0.5:
             raise ValueError('The innermost sphere is inside the box.')
 
@@ -176,42 +196,22 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
         subtomograms.band,
         sampling_bandwidth=2 * design.bandwidth,
     )
-    # The one crossing the particles make. Everything after this reads
-    # them from the device, so a thousand particles cost one copy and not
-    # a thousand. Expanding them in a Python loop instead, which is what
-    # this used to do, sent each particle over and brought its
-    # coefficients back, and then sent those over again to align with.
-    started = time.perf_counter()
-    data = to_device(subtomograms.data)
-    weight = to_device(subtomograms.weight)
-    # Two particles are compared over the frequencies both measured, and
-    # not in proportion to how well. A weight that follows the transfer
-    # is largest where every tilt overlaps, on the tilt axis and at the
-    # lowest frequencies, which is also where what surrounds the particle
-    # is strongest, and that is not noise the weight knows about. Counting
-    # those frequencies by their weight once more took the pairs aligned
-    # correctly on EMPIAR-10304 from eighteen in a hundred to five. The
-    # average below does use the weight, as it must to undo the transfer.
-    measured = (weight > 0.0).astype(weight.dtype)
-    expansions = jax.lax.map(
-        lambda particle: expand_particle(
-            particle[0], particle[1], basis, design.phases
-        ),
-        (data, measured),
-        batch_size=max(design.batch, 1),
-    )
-    # The timing above means nothing without this: JAX dispatches
-    # asynchronously, so the loop returns before the work is done.
-    jax.tree.map(lambda leaf: leaf.block_until_ready(), expansions)
-    _LOGGER.info(
-        'Expanded %d particles in %.1f s.', count, time.perf_counter() - started
-    )
-
     settings = Settings(
         bandwidth=design.bandwidth,
         candidates=design.candidates,
         max_shift=design.max_shift,
         phases=design.phases,
+    )
+    # Rotations and shifts are searched at once when the phases are kept
+    # and the particles may be further off than the search over shifts
+    # reaches by itself. The lattice is searched at half the bandwidth.
+    spacing = lattice_spacing(subtomograms.band, float(radii[-1]))
+    together = design.phases and design.max_shift >= spacing
+    coarse = make_basis(
+        radii,
+        max(design.bandwidth // 2, 2),
+        subtomograms.band,
+        sampling_bandwidth=2 * max(design.bandwidth // 2, 2),
     )
     # The shifts are searched over the spheres the rotations were. Built
     # on the device: it is the shape of one particle, and a copy of that
@@ -225,117 +225,185 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
     in_band = (
         (distance >= float(radii[0])) & (distance <= float(radii[-1]) + 0.5)
     ).astype(jnp.float32)
-    started = time.perf_counter()
-    aligned = align_pairs(
-        data,
-        measured,
-        expansions,
-        left,
-        right,
-        settings,
-        batch=design.batch,
-        band=in_band,
-    )
-    elapsed = time.perf_counter() - started
-    _LOGGER.info(
-        'Aligned %d pairs in %.1f s, %.2f ms each.',
-        len(left),
-        elapsed,
-        1e3 * elapsed / max(len(left), 1),
-    )
-
-    measurements = to_host(aligned.rotation, dtype=np.float64)
-    measured_shifts = to_host(aligned.shift, dtype=np.float64)
-    scores = to_host(aligned.score, dtype=np.float64)
-
-    if design.refine:
+    applied = np.zeros((count, 3))
+    for number in range(design.passes):
+        # The one crossing the particles make. Everything after this reads
+        # them from the device, so a thousand particles cost one copy and not
+        # a thousand. Expanding them in a Python loop instead, which is what
+        # this used to do, sent each particle over and brought its
+        # coefficients back, and then sent those over again to align with.
         started = time.perf_counter()
-        for index, (first, second) in enumerate(zip(left, right, strict=True)):
-            turn, offset, value = refine_alignment(
-                subtomograms.data[first],
-                subtomograms.weight[first],
-                subtomograms.data[second],
-                subtomograms.weight[second],
-                measurements[index],
-                measured_shifts[index],
-            )
-            measurements[index] = to_host(turn, dtype=np.float64)
-            measured_shifts[index] = to_host(offset, dtype=np.float64)
-            scores[index] = float(value)
+        data, weight = recentred(
+            subtomograms, applied if number else None, design.batch
+        )
+        # Two particles are compared over the frequencies both measured, and
+        # not in proportion to how well. A weight that follows the transfer
+        # is largest where every tilt overlaps, on the tilt axis and at the
+        # lowest frequencies, which is also where what surrounds the particle
+        # is strongest, and that is not noise the weight knows about. Counting
+        # those frequencies by their weight once more took the pairs aligned
+        # correctly on EMPIAR-10304 from eighteen in a hundred to five. The
+        # average below does use the weight, as it must to undo the transfer.
+        measured = (weight > 0.0).astype(weight.dtype)
+        expansions = jax.lax.map(
+            lambda particle: expand_particle(
+                particle[0], particle[1], basis, design.phases
+            ),
+            (data, measured),
+            batch_size=max(design.batch, 1),
+        )
+        # The timing above means nothing without this: JAX dispatches
+        # asynchronously, so the loop returns before the work is done.
+        jax.tree.map(lambda leaf: leaf.block_until_ready(), expansions)
         _LOGGER.info(
-            'Refined %d pairs in %.1f s.',
-            len(left),
+            'Expanded %d particles in %.1f s.',
+            count,
             time.perf_counter() - started,
         )
-    # A correlation runs from minus one to one; a weight does not.
-    weights = np.clip(0.5 * (1.0 + scores), 0.0, 1.0)
 
-    detected = 'C1'
-    by_symmetry: dict[str, float] = {}
-    if design.detect:
-        detected, by_symmetry = detect_symmetry(
-            measurements, left, right, generator
-        )
-        # The detector reads angles, not axes, so it cannot tell a
-        # dihedral group from the cyclic one inside it. Warning on a
-        # different name would cry wolf. What is worth saying is that the
-        # group asked for explains the residuals badly.
-        asked = by_symmetry.get(design.symmetry)
-        best = max(by_symmetry.values(), default=0.0)
-        if asked is not None and asked < best - 0.25:
-            _LOGGER.warning(
-                'The pairs look more like %s (%.2f) than %s (%.2f). If the '
-                'symmetry is wrong the orientations will be too.',
-                detected,
-                best,
-                design.symmetry,
-                asked,
+        joint = None
+        if together:
+            # The first pass has to reach as far as the particles may be
+            # off. After it they have been brought back to where the pairs
+            # put them, and one step of the lattice is enough.
+            reach = design.max_shift if number == 0 else spacing
+            joint = Joint(
+                coarse=coarse,
+                fine=basis,
+                lattice=to_device(shift_lattice(reach, spacing), jnp.float32),
+                spacing=spacing,
             )
-
-    synchronized = synchronize_rotations(
-        count,
-        left,
-        right,
-        measurements,
-        weights,
-        symmetry=design.symmetry,
-        rounds=design.rounds,
-        reject_above=(
-            None
-            if design.reject_above is None
-            else float(np.radians(design.reject_above))
-        ),
-    )
-    orientations = synchronized.orientations
-
-    kept = synchronized.kept
-    if not is_connected(count, left[kept], right[kept]):
-        _LOGGER.warning(
-            'Rejecting outliers left the particles in more than one piece. '
-            'Each piece has its own frame and nothing relates them, so the '
-            'average is not meaningful. Ask for more partners, or raise '
-            'the rejection threshold.'
-        )
-    else:
-        weak = bridges(count, left[kept], right[kept])
-        if len(weak):
-            _LOGGER.warning(
-                '%d of the surviving pairs are the only thing holding two '
-                'groups of particles together. Everything those groups say '
-                'about each other rests on one measurement apiece, which '
-                'nothing can contradict, so it may be wrong without any '
-                'residual showing it. Ask for more partners.',
-                len(weak),
+            _LOGGER.info(
+                'Pass %d: %d trial shifts, %.2f voxels of the band apart.',
+                number + 1,
+                joint.lattice.shape[0],
+                spacing,
             )
+        started = time.perf_counter()
+        aligned = align_pairs(
+            data,
+            measured,
+            expansions,
+            left,
+            right,
+            settings,
+            batch=design.batch,
+            band=in_band,
+            joint=joint,
+        )
+        elapsed = time.perf_counter() - started
+        _LOGGER.info(
+            'Aligned %d pairs in %.1f s, %.2f ms each.',
+            len(left),
+            elapsed,
+            1e3 * elapsed / max(len(left), 1),
+        )
 
-    centres, _ = synchronize_shifts(
-        count,
-        left[kept],
-        right[kept],
-        measured_shifts[kept],
-        orientations,
-        weights[kept],
-    )
+        measurements = to_host(aligned.rotation, dtype=np.float64)
+        measured_shifts = to_host(aligned.shift, dtype=np.float64)
+        scores = to_host(aligned.score, dtype=np.float64)
+
+        if design.refine:
+            started = time.perf_counter()
+            for index, (first, second) in enumerate(
+                zip(left, right, strict=True)
+            ):
+                turn, offset, value = refine_alignment(
+                    subtomograms.data[first],
+                    subtomograms.weight[first],
+                    subtomograms.data[second],
+                    subtomograms.weight[second],
+                    measurements[index],
+                    measured_shifts[index],
+                )
+                measurements[index] = to_host(turn, dtype=np.float64)
+                measured_shifts[index] = to_host(offset, dtype=np.float64)
+                scores[index] = float(value)
+            _LOGGER.info(
+                'Refined %d pairs in %.1f s.',
+                len(left),
+                time.perf_counter() - started,
+            )
+        # A correlation runs from minus one to one; a weight does not.
+        weights = np.clip(0.5 * (1.0 + scores), 0.0, 1.0)
+
+        detected = 'C1'
+        by_symmetry: dict[str, float] = {}
+        if design.detect:
+            detected, by_symmetry = detect_symmetry(
+                measurements, left, right, generator
+            )
+            # The detector reads angles, not axes, so it cannot tell a
+            # dihedral group from the cyclic one inside it. Warning on a
+            # different name would cry wolf. What is worth saying is that the
+            # group asked for explains the residuals badly.
+            asked = by_symmetry.get(design.symmetry)
+            best = max(by_symmetry.values(), default=0.0)
+            if asked is not None and asked < best - 0.25:
+                _LOGGER.warning(
+                    'The pairs look more like %s (%.2f) than %s (%.2f). If the '
+                    'symmetry is wrong the orientations will be too.',
+                    detected,
+                    best,
+                    design.symmetry,
+                    asked,
+                )
+
+        synchronized = synchronize_rotations(
+            count,
+            left,
+            right,
+            measurements,
+            weights,
+            symmetry=design.symmetry,
+            rounds=design.rounds,
+            reject_above=(
+                None
+                if design.reject_above is None
+                else float(np.radians(design.reject_above))
+            ),
+        )
+        orientations = synchronized.orientations
+
+        kept = synchronized.kept
+        if not is_connected(count, left[kept], right[kept]):
+            _LOGGER.warning(
+                'Rejecting outliers left the particles in more than one piece. '
+                'Each piece has its own frame and nothing relates them, so the '
+                'average is not meaningful. Ask for more partners, or raise '
+                'the rejection threshold.'
+            )
+        else:
+            weak = bridges(count, left[kept], right[kept])
+            if len(weak):
+                _LOGGER.warning(
+                    '%d of the surviving pairs are the only thing holding two '
+                    'groups of particles together. Everything those groups say '
+                    'about each other rests on one measurement apiece, which '
+                    'nothing can contradict, so it may be wrong without any '
+                    'residual showing it. Ask for more partners.',
+                    len(weak),
+                )
+
+        centres, _ = synchronize_shifts(
+            count,
+            left[kept],
+            right[kept],
+            measured_shifts[kept],
+            orientations,
+            weights[kept],
+        )
+        if number < design.passes - 1:
+            # Bring every particle back to where the pairs put it, and go
+            # again: a pair whose particles are centred is a pair the
+            # rotational search can see.
+            applied = applied + centres
+            _LOGGER.info(
+                'Pass %d moved the centres by a median of %.2f voxels of the '
+                'band.',
+                number + 1,
+                float(np.median(np.linalg.norm(centres, axis=1))),
+            )
 
     structure, support = average(data, weight, orientations, centres)
     halves = []
@@ -355,7 +423,7 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
 
     return Result(
         orientations=orientations,
-        shifts=centres * subtomograms.scale,
+        shifts=(applied + centres) * subtomograms.scale,
         left=left,
         right=right,
         scores=scores,
