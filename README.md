@@ -39,12 +39,20 @@ the same files, and the version is detected rather than asked for.
 
 ```bash
 frmony run Extract/job006/particles.star run1/ --partners 150 \
-    --phases --mask-radius 16 --root . --verbose
+    --phases --mask-radius 16 --max-shift 4.5 --passes 3 --root . --verbose
 ```
 
 `--phases` and `--mask-radius` are what real subtomograms have needed. The
 first keeps the phases in the rotational search. The second is the radius
 of a soft mask in voxels of the box, a little wider than the particle.
+
+`--max-shift` is how far apart the centres of two particles may be, in
+voxels of the analysis band. Rotations and shifts are searched together
+out to that distance. Make it what the picking warrants and no more: the
+further it reaches, the fewer pairs it aligns. For particles extracted at
+refined centres, 1 is right. `--passes` brings the particles back to the
+centres found and aligns again, which particles that are off centre need.
+
 `--root` is the RELION project, which is what the paths in the table are
 relative to.
 
@@ -76,27 +84,40 @@ print(result.resolution, result.orientations.shape)
 
 ### Pairwise alignment
 
-This happens in two stages.
+A pair has six unknowns, a rotation and a shift, and they are searched
+together.
 
-The first stage finds the rotation. It works on the amplitudes of the two
-Fourier transforms, which do not move when the particle does, so the
-rotation can be found before the shift is known. One inverse FFT gives the
-correlation at every rotation of a grid at once. This is Kovacs and
-Wriggers (2002).
+Each subtomogram is expanded in spherical harmonics on spheres of its
+Fourier transform. One inverse FFT then gives the correlation of two of
+them at every rotation of a grid at once. This is Kovacs and Wriggers
+(2002). With `--phases` the correlation is the full one, phases included,
+which is what real subtomograms need. It is then only right at the shift
+the pair is actually at.
 
-That stage keeps the best few rotations rather than the best one.
-Amplitudes throw away the phases, so they discriminate less than the full
-score does. The right rotation is reliably among the best few even when it
-is not the best one.
+So the rotational search is run at a lattice of trial shifts. A shift of
+a pair is a shift of its first particle, which is a phase on its
+spectrum, so each trial costs one more expansion and one more grid. The
+lattice is searched at half the bandwidth. The rotation is then found at
+the full bandwidth, at the shift the lattice gave, and one more transform
+refines the shift.
 
-The second stage takes each of those candidates and runs one more
-transform. That gives the correlation at every shift at once, with the
-phases back in.
+This searches the same six unknowns as the five degree of freedom method
+of Kovacs et al. (2003), which `frmony.matching.frm5d` implements and
+which it was measured against. They align the same pairs. This one takes
+a thousandth of the time.
+
+Without `--phases` the rotation is searched on amplitudes, which do not
+move when the particle does, and the best few are then scored in full.
+That is enough for clean volumes and not for subtomograms.
 
 ### Synchronization
 
 A generalized power method finds the orientations that fit every pair best.
 Least squares then gives the centres.
+
+With `--passes`, the particles are brought back to those centres and
+aligned again. A pair of centred particles is easier to align than a
+pair that is not, so each pass aligns more.
 
 ### Averaging
 
@@ -149,25 +170,37 @@ brings it down to three. With noise as large as the signal, the
 synchronized median is five degrees. At twice the signal it is fourteen. At
 three times it breaks down, at forty-three.
 
-**On real data, one dataset.** EMPIAR-10304, 10357 ribosomes as RELION 5
-pseudo-subtomograms of 48 voxels at 12.6 A, compared with the orientations
-of a RELION refinement of the same particles. With `--phases` and
-`--mask-radius 16`, three pairs in ten came out within fifteen degrees of
-the refinement. With 150 partners the synchronized orientations had a
-median error of 7.0 degrees, 83 in a hundred within fifteen, after seven
-minutes on one GPU. That is one dataset, of a large particle, at one
-binning.
+**On real data, one dataset, picked twice.** EMPIAR-10304, ribosomes as
+RELION 5 pseudo-subtomograms of 48 voxels at 12.6 A, compared with the
+orientations of a RELION refinement. All with `--phases
+--mask-radius 16` and 150 partners.
 
-**Without `--phases` it does not work on that data.** The rotational search
-on amplitudes alone aligned three pairs in a thousand, which is what chance
-gives, and the orientations that came out were random. The simulations do
-not show this, because they are not noisy enough. `--phases` is off by
-default only because it gives up something: see the next paragraph.
+The first picking is 10357 particles extracted at refined centres. With
+`--max-shift 1`, the orientations came out with a median error of 5.2
+degrees, 90 in a hundred within fifteen, in five minutes on one GPU.
 
-**`--phases` needs the particles roughly centred.** The amplitudes were
-chosen because they do not move when the particle does. The phases do. The
-particles above had been extracted at refined centres. How far a particle
-can be off before the rotation is lost has not been measured.
+The second is 12546 particles from another picking, about 24 A off centre,
+of which 7671 are within 60 A of a refined particle and can be judged.
+With `--max-shift 4.5 --passes 3`, those had a median error of 13 degrees,
+57 in a hundred within fifteen and 81 within thirty, in 33 minutes. Their
+centres came back to 5 A in the plane and 13 A along the beam. The
+quarter picked furthest off, beyond 20 A in the plane, did worst, at 38
+in a hundred.
+
+That is one dataset, of a large particle, at one binning.
+
+**Without `--phases` it does not work on that data.** The rotational
+search on amplitudes aligned three pairs in a thousand, which is what
+chance gives. Amplitudes do know something once each voxel is
+standardized over the particles, which this package does not yet do, but
+under half of what the phases know, and that is not enough to pick a
+rotation out of a hundred thousand.
+
+**A single pair is weak, and weaker when its shift is unknown.** On
+centred particles 40 pairs in a hundred come out within fifteen degrees.
+Letting the shift vary by five voxels halves that, whatever does the
+searching: the true rotation is already at its best shift and every wrong
+one gets to choose its luckiest. Synchronization is what makes up for it.
 
 **The resolution is not a gold standard.** The two halves are aligned
 together, and they share whatever the tomograms have in common. On the
@@ -194,11 +227,13 @@ It raises the score every time. Where a wide wedge is missing, though, the
 peak of the score sits a little away from the true orientation. Climbing
 harder can then walk away from the right answer.
 
-`matching.frm5d` holds the mathematics of the five degree of freedom method
-of Kovacs et al. (2003). The two-centre integrals and the five-dimensional
-series are built and tested against an exact identity. What is missing is
-the map from a grid index back to a pair of rotations, so this is not yet
-an engine that `matching` will dispatch to.
+`matching.frm5d` is the five degree of freedom method of Kovacs et al.
+(2003), held against a direct sum by its tests. It is a yardstick and
+not an engine: it searches what the pairwise engine searches, at 1.4
+seconds a pair.
+
+What it needs before it says anything about real subtomograms is in its
+module docstring.
 
 ## References
 

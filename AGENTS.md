@@ -111,15 +111,55 @@ frequencies carry a particle's mass and not its orientation. Leaving them
 in took a median pairwise error from three degrees to eight and sent four
 pairs in ten past thirty. `harmonics.band_radii` drops them, and says so.
 
-**Amplitudes are not enough under noise.** The first stage on `|D|` put
-the right rotation at the sixty-third percentile of its grid on real
-subtomograms, where chance is the fiftieth. Centring the amplitudes,
-standardising them shell by shell and using the power instead all left it
-there. The reason is the order of the signal: a product of two noisy
-spectra has an expectation that goes as the signal squared, and a product
-of their amplitudes one that goes as its fourth power. `Design.phases`
-expands `D` itself. Do not expect a better normalization of the amplitudes
-to save them.
+**Amplitudes are not enough under noise.** As shipped, the truth stood
+0.35 deviations above the amplitude grid on real subtomograms. A pattern
+every particle shares in the frame of the tomogram drowns it. Take that
+out, by standardizing each Fourier voxel over the particles, and it
+stands 1.6 above, against 3.8 for the phases. That is real and still not
+enough to name a rotation, and added to the phased score it changed
+nothing that a hundred pairs could show. Centring, standardizing by
+shell, using the power, and regressing out a particle's own transfer all
+left it where it was. `Design.phases` expands the spectrum itself.
+
+**Do not measure a score at the truth by the best of its neighbours.**
+Taking the largest of the 27 samples around the truth's index puts pure
+noise 0.9 deviations up. It made the amplitudes look worth 2.25. Take
+the sample itself, or measure the same thing at a random index beside
+it.
+
+**The shift is the hard part, and no search gets round it.** With the
+shift known, 40 pairs in a hundred align. Let it vary by five voxels and
+it is 22 at best, whatever searches. Three searches were measured on
+pairs forty angstroms apart. Starting from amplitudes: 4. Alternating
+rotations and shifts after Chen et al. (2013): 9 to 12, because with the
+shift wrong the rotational grid is empty and the first rotation is
+arbitrary. Both at once, by `frm5d` or by the lattice in `pairwise`: 22
+to 24. Do not bring the alternation back.
+
+**The second stage is not the judge any more.** It turns the second
+particle by interpolating its spectrum, and with phases in the first
+stage it ranks candidates worse than the first stage did. It finds the
+shift of the top peak and nothing else. It also runs over the band of
+the rotations and not the whole cube: the lowest frequencies lead it
+astray exactly as they would the rotations.
+
+**Five-dimensional FRM needs four things, each found by its silence.**
+Real-space volumes. Band-passed like the rotational search. Sampled
+twice as finely as the band, with shells half a voxel apart. Divided by
+the denominators of the constrained score, looked up from the
+three-dimensional grids. Without any one of them it aligns a few pairs
+in a hundred where it should align fifty.
+
+**The series of `frm5d` was wrong and its tests could not tell.** They
+checked the integrals at a distance of zero. The series built on them
+left out the powers of i. Nothing is right until it is held against a
+direct sum, and `tests/test_frm5d.py` now does that.
+
+**A truth from coordinates is not exact.** Two extractions of the same
+tomograms with different motion models do not share positions. Offsets
+taken as the difference of their coordinates were ten angstroms out,
+which was enough to make every "centred" measurement on the second
+picking wrong. Displace the first picking by known amounts instead.
 
 **One model for every input.** A spectrum comes with a transfer `W`, and
 is `W S` plus noise of variance `W`. `particles.whiten` divides it by the
@@ -191,16 +231,15 @@ Do not claim otherwise in documentation or commit messages.
   RELION adds or subtracts the origin is untested, and would be silent if
   wrong.
 - Accuracy on real data has been measured on one dataset, EMPIAR-10304,
-  with particles that were already centred. How `Design.phases` holds up
-  when they are not is unmeasured.
+  picked twice, and on its first picking displaced by known amounts.
+  Nothing smaller than a ribosome has been tried.
 - The half-set correlation is not independent. The halves are aligned
   together.
-- The second stage picks among the candidates slightly worse than the
-  first stage ranked them, 29 right in a hundred against 37. Why is not
-  known.
-- `matching/frm5d.py` has the mathematics but not the map from a grid index
-  back to a pair of rotations. It is not an engine yet, and `matching` does
-  not dispatch to it.
+- `matching/frm5d.py` is held to a direct sum on smooth phantoms at a
+  bandwidth of eight. On real data it was only run from scripts, which
+  are not in this repository.
+- Standardizing each voxel over the particles, which is what gives the
+  amplitudes any use, is not in the package.
 - The loader reads volumes one at a time. It does not overlap reads with
   computation.
 - The memory formula in `pipeline.Design` is reasoned, not measured. What

@@ -24,11 +24,34 @@ The first run on real data, EMPIAR-10304.
   longer in proportion to their weights.
 - The time a pair took was logged in whole milliseconds, so as zero.
 
+- The rotational search stopped at a third of the sampling rate. It
+  now runs to the last sphere that fits in the band.
+- The search over shifts ran over every frequency, the lowest among
+  them. It runs over the band of the rotations.
+- The series of `matching.frm5d` was wrong, and is derived again from
+  the three-dimensional one and held against a direct sum.
+
+### Changed
+
+- With phases, the second stage finds the shift of the first stage's
+  best rotation and no longer chooses among candidates.
+- `Design.batch` defaults to 8, which was measured, where 32 was
+  reasoned and is two and a half times slower.
+- A mask is carried with the particles and applied at the centre each is
+  believed to have. `load_subtomograms` no longer applies it.
+- `--max-shift` is how far apart two particles' centres may be, and with
+  `--phases` it is how far rotations and shifts are searched together.
+
 ### Added
 
 - `Design.phases` and `--phases`, which keep the phases in the rotational
-  search. Real subtomograms needed it. It is off by default because it
-  needs the particles roughly centred.
+  search. Real subtomograms needed it.
+- Rotations and shifts searched at once, over a lattice of trial shifts,
+  for particles that are off centre: `matching.Joint`.
+- `Design.passes` and `--passes`, which bring the particles back to the
+  centres found and align again.
+- `matching.frm5d.grid_to_rotations`, which makes the five-dimensional
+  method usable as a yardstick.
 
 ## [0.1.0] - 2026-11-20
 
