@@ -108,6 +108,26 @@ def test_a_shell_correlation_with_itself_is_one(
     np.testing.assert_allclose(correlation, 1.0, atol=1e-9)
 
 
+def test_an_empty_shell_has_no_correlation_and_is_passed_over() -> None:
+    # The zero frequency is cleared on loading, so the innermost shell of
+    # every real average is empty. Reporting zero there, which is below
+    # any threshold, made the resolution of every run infinite. It was
+    # found on the first real dataset, where a curve that crossed at 60 A
+    # was reported as never having agreed at all.
+    rng = np.random.default_rng(0)
+    volume = rng.normal(size=(16,) * 3) + 1j * rng.normal(size=(16,) * 3)
+    volume[8, 8, 8] = 0.0
+    frequency, correlation = fourier_shell_correlation(volume, volume)
+    assert np.isnan(correlation[0])
+    np.testing.assert_allclose(correlation[1:], 1.0, atol=1e-6)
+
+    falling = np.where(np.arange(len(correlation)) < 5, correlation, 0.0)
+    falling[0] = np.nan
+    resolution = resolution_at(frequency, falling, 2.0)
+    assert np.isfinite(resolution)
+    assert 2.0 / frequency[5] < resolution < 2.0 / frequency[4]
+
+
 def test_resolution_reads_the_crossing() -> None:
     frequency = np.array([0.1, 0.2, 0.3, 0.4])
     correlation = np.array([1.0, 1.0, 0.143, 0.0])

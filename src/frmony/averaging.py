@@ -148,8 +148,12 @@ def fourier_shell_correlation(
 
     cross = total((left * np.conjugate(right)).real)
     power = np.sqrt(total(np.abs(left) ** 2) * total(np.abs(right) ** 2))
+    # A shell with nothing in it has no correlation, which is not the
+    # same as a correlation of zero. The innermost shell is always such a
+    # one here, since the zero frequency is cleared on loading, and
+    # calling it zero made every resolution come out infinite.
     correlation = np.where(
-        power > 0.0, cross.real / np.maximum(power, 1e-30), 0.0
+        power > 0.0, cross.real / np.maximum(power, 1e-30), np.nan
     )
     frequency = (np.arange(count) + 0.5) / (2.0 * count)
     return frequency, correlation
@@ -164,8 +168,12 @@ def resolution_at(
     """Where a shell correlation first falls below a threshold [A].
 
     Returns infinity if it never does, which means the data ran out before
-    the agreement did.
+    the agreement did. Shells with no correlation to speak of, which are
+    not a number, are passed over.
     """
+    defined = np.isfinite(correlation)
+    frequency = frequency[defined]
+    correlation = correlation[defined]
     below = np.flatnonzero(correlation < threshold)
     if len(below) == 0:
         return float('inf')
