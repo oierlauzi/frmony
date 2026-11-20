@@ -15,6 +15,7 @@ wedge or a zero of the contrast transfer function left at nothing.
 """
 
 from .correlation import Expansion, expand_particle, rotation_score
+from .frm5d import correlation_5d, series_5d, two_centre_integrals
 from .pairwise import (
     Alignment,
     Settings,
@@ -45,6 +46,7 @@ __all__ = [
     'align_pair',
     'align_pairs',
     'candidate_rotations',
+    'correlation_5d',
     'correlation_grid',
     'expand_particle',
     'frequency_grid',
@@ -57,7 +59,9 @@ __all__ = [
     'rotation_score',
     'rotational_correlation',
     'score_at',
+    'series_5d',
     'shift_correlation',
     'shift_of_index',
     'top_peaks',
+    'two_centre_integrals',
 ]

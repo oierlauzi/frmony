@@ -209,6 +209,14 @@ def two_centre_integrals(
     Returns:
         ``(2B, B, 2B, B, 2B)``, indexed by the Fourier variable ``n`` and
         then by the degree and order taken from each particle.
+
+    Note that the first particle is the conjugated one here, following the
+    2003 paper, while `frmony.matching.rotation.radial_overlap` conjugates
+    the second, following the 2002 one. The two papers differ, and the
+    result is that at a distance of zero these integrals come out as the
+    *conjugate* of that overlap rather than equal to it. A test pins that
+    down, since it is exactly the sort of thing that would otherwise be
+    found much later and blamed on something else.
     """
     weight_per_shell = jnp.asarray(radial_weight)[:, None, None]
     bare = jnp.where(jnp.abs(weight_per_shell) > 0, weight_per_shell, 1.0)

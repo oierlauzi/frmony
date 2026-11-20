@@ -53,3 +53,11 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
   itself, by gradient. Off by default: it raises the score every time, but
   where a wide wedge is missing the peak of the score is not quite at the
   true orientation, so climbing harder can walk away from it.
+- `matching.frm5d`, the mathematics of the five-degree-of-freedom method of
+  Kovacs et al. (2003): the two-centre integrals, through the cylindrical
+  factorization that makes them one batched matrix product, and the
+  five-dimensional series over them. The integrals are held to an exact
+  identity, that at a distance of zero they collapse onto the ordinary
+  radial overlap. Which rotations a grid index stands for is not yet
+  settled, so this is not yet an engine `pairwise` can dispatch to; the
+  module says so.
