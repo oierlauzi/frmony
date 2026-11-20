@@ -337,11 +337,17 @@ def detect_symmetry(
     by. The smallest group that explains almost as much as the best one
     wins, so that noise alone does not argue for more symmetry than there is.
 
-    Only the cyclic groups and the three polyhedral ones are considered. A
-    dihedral group has the same set of angles as a cyclic one plus pi, so
-    the angles alone cannot always tell them apart; when ``'D<n>'`` is the
-    answer the report names it among the scores and leaves the choice to
-    whoever reads it.
+    What this can and cannot do is worth being plain about. It sees only
+    the angles the group turns by, never the axes, so it separates the
+    cyclic groups cleanly and confuses the rest with them: ``D2`` turns by
+    nothing and by half a turn, which is exactly ``C2``'s set of angles,
+    and ``T`` shares its angles with ``C6``. So the name that comes back
+    is the smallest group whose angles fit, and a larger group with the
+    same angles is not ruled out. It is a warning that the symmetry asked
+    for does not match the data, not a decision about what to use.
+
+    The scores say more than the name does, and they are corrected for
+    what each group would explain by chance.
 
     Args:
         measurements: Relative orientations of the pairs, ``(pairs, 3, 3)``.
@@ -366,13 +372,28 @@ def detect_symmetry(
     for name in candidates:
         expected = rotation_angle(point_group(name))
         distance = np.abs(angles[:, None] - expected[None, :]).min(axis=1)
-        scores[name] = float(np.mean(distance < tolerance))
+        observed = float(np.mean(distance < tolerance))
+
+        # Corrected for what the group would explain by chance. A large
+        # group has many angles, and a band around each of them covers so
+        # much of the range that noise alone looks like symmetry: C12 has
+        # a turn every thirty degrees, so with a fifteen degree tolerance
+        # it explains everything, symmetric or not. The correction asks
+        # how much better the group does than it would on rotations drawn
+        # uniformly, whose angle has density (1 - cos t) / pi.
+        grid = np.linspace(0.0, np.pi, 2048)
+        density = (1.0 - np.cos(grid)) / np.pi
+        covered = (
+            np.abs(grid[:, None] - expected[None, :]).min(axis=1) < tolerance
+        )
+        chance = float(np.trapezoid(density * covered, grid))
+        scores[name] = (observed - chance) / max(1.0 - chance, 1e-9)
 
     best = max(scores.values())
-    # Prefer the smallest group that is within a whisker of the best, so a
-    # C1 dataset is not called C2 on the strength of a few stray triangles.
+    # Among the groups that do about as well, the smallest wins: a few
+    # stray triangles should not argue for more symmetry than there is.
     for name in candidates:
-        if scores[name] >= best - 0.02:
+        if scores[name] >= best - 0.05:
             return name, scores
     return 'C1', scores
 

@@ -43,3 +43,9 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
   linear least squares. Symmetry is handled by snapping each measurement
   onto the coset member nearest the current estimate, and outliers by their
   residual measured modulo the group.
+- `io`, `particles`, `averaging`, `pipeline` and a command line. RELION 4
+  and 5 three-dimensional pseudo-subtomograms are read, as are plain
+  volumes with a tilt range, through a registry that takes new conventions
+  without being edited. The average is a weighted one in Fourier space,
+  where the particles supply each other the frequencies their own missing
+  wedges never reached.
