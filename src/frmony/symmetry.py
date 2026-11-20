@@ -390,10 +390,15 @@ def detect_symmetry(
         scores[name] = (observed - chance) / max(1.0 - chance, 1e-9)
 
     best = max(scores.values())
-    # Among the groups that do about as well, the smallest wins: a few
-    # stray triangles should not argue for more symmetry than there is.
+    # Among the groups that do about as well, the smallest wins, and the
+    # margin is wide on purpose. On a particle with no symmetry the groups
+    # score within a few hundredths of one another, so a narrow margin
+    # turns noise into a confident wrong answer; where there really is
+    # symmetry the gap is enormous -- a true C4 scores 1.0 against C1's
+    # 0.23 -- so nothing is lost by being slow to believe it. This is a
+    # warning, and a false one costs more than a missed one.
     for name in candidates:
-        if scores[name] >= best - 0.05:
+        if scores[name] >= best - 0.10:
             return name, scores
     return 'C1', scores
 
