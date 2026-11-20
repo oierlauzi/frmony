@@ -100,6 +100,11 @@ def _measurements(
     symmetry: str = 'C1',
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     truth = random_rotations(rng, count)
+    # The partners asked for throughout this file are two and a half
+    # times what they once were. `build_pairs` used to hand out that
+    # many more than it was asked for, and the tolerances below were
+    # measured on those graphs, so asking for what they really had keeps
+    # each test measuring what it measured.
     left, right = build_pairs(count, partners, rng)
     group = point_group(symmetry)
     chosen = group[rng.integers(0, len(group), len(left))]
@@ -128,7 +133,7 @@ def test_polar_rows_orthonormalizes(rng: np.random.Generator) -> None:
 def test_synchronize_recovers_the_orientations(
     rng: np.random.Generator,
 ) -> None:
-    truth, left, right, measured = _measurements(rng, 60, 8)
+    truth, left, right, measured = _measurements(rng, 60, 20)
     weights = rng.uniform(0.5, 2.0, len(left))
 
     found, iterations = synchronize(60, left, right, measured, weights)
@@ -137,7 +142,7 @@ def test_synchronize_recovers_the_orientations(
 
 
 def test_synchronize_survives_noise(rng: np.random.Generator) -> None:
-    truth, left, right, measured = _measurements(rng, 80, 10, noise=5.0)
+    truth, left, right, measured = _measurements(rng, 80, 24, noise=5.0)
     weights = np.ones(len(left))
 
     found, _ = synchronize(80, left, right, measured, weights)
@@ -152,7 +157,7 @@ def test_the_result_is_a_rotation_not_a_reflection(
     Letting a reflection through would mirror the structure, and nothing
     downstream would notice.
     """
-    _, left, right, measured = _measurements(rng, 40, 6, noise=3.0)
+    _, left, right, measured = _measurements(rng, 40, 15, noise=3.0)
     found, _ = synchronize(40, left, right, measured, np.ones(len(left)))
     np.testing.assert_allclose(np.linalg.det(found), 1.0, atol=1e-9)
 
@@ -179,7 +184,7 @@ def test_collapse_is_not_fooled_by_degenerate_singular_values(
 
 
 def test_a_weight_of_zero_ignores_a_pair(rng: np.random.Generator) -> None:
-    truth, left, right, measured = _measurements(rng, 40, 6)
+    truth, left, right, measured = _measurements(rng, 40, 15)
     weights = np.ones(len(left))
 
     spoiled = measured.copy()
@@ -191,7 +196,7 @@ def test_a_weight_of_zero_ignores_a_pair(rng: np.random.Generator) -> None:
 
 
 def test_synchronize_refuses_nonsense(rng: np.random.Generator) -> None:
-    _, left, right, measured = _measurements(rng, 10, 3)
+    _, left, right, measured = _measurements(rng, 10, 8)
     weights = np.ones(len(left))
     with pytest.raises(ValueError, match='each pair'):
         synchronize(10, left, right, measured, weights[:-1])
@@ -222,7 +227,7 @@ def test_no_pairs_keeps_the_start(rng: np.random.Generator) -> None:
 
 def test_the_tree_satisfies_its_own_edges(rng: np.random.Generator) -> None:
     """A tree has no cycles, so nothing can disagree along it."""
-    truth, left, right, measured = _measurements(rng, 50, 5)
+    truth, left, right, measured = _measurements(rng, 50, 12)
     weights = rng.uniform(0.1, 1.0, len(left))
 
     found = propagate_along_tree(50, left, right, measured, weights)
@@ -230,7 +235,7 @@ def test_the_tree_satisfies_its_own_edges(rng: np.random.Generator) -> None:
 
 
 def test_the_tree_is_a_good_start(rng: np.random.Generator) -> None:
-    truth, left, right, measured = _measurements(rng, 60, 6, noise=6.0)
+    truth, left, right, measured = _measurements(rng, 60, 15, noise=6.0)
     weights = np.ones(len(left))
 
     start = propagate_along_tree(60, left, right, measured, weights)
@@ -247,7 +252,7 @@ def test_the_tree_is_a_good_start(rng: np.random.Generator) -> None:
 def test_the_driver_recovers_the_orientations(
     rng: np.random.Generator,
 ) -> None:
-    truth, left, right, measured = _measurements(rng, 60, 8, noise=4.0)
+    truth, left, right, measured = _measurements(rng, 60, 20, noise=4.0)
     result = synchronize_rotations(
         60, left, right, measured, np.ones(len(left))
     )
@@ -268,7 +273,7 @@ def test_a_symmetric_particle_still_synchronizes(
     """
     count = 60
     truth, left, right, measured = _measurements(
-        rng, count, 10, noise=2.0, symmetry=symmetry
+        rng, count, 24, noise=2.0, symmetry=symmetry
     )
     result = synchronize_rotations(
         count,
@@ -288,7 +293,7 @@ def test_a_symmetric_particle_still_synchronizes(
 def test_ignoring_symmetry_fails(rng: np.random.Generator) -> None:
     """The case that makes the symmetry handling worth having."""
     count = 60
-    truth, left, right, measured = _measurements(rng, count, 10, symmetry='C4')
+    truth, left, right, measured = _measurements(rng, count, 24, symmetry='C4')
     group = point_group('C4')
 
     naive = synchronize_rotations(
@@ -310,7 +315,7 @@ def test_ignoring_symmetry_fails(rng: np.random.Generator) -> None:
 
 def test_outliers_are_dropped(rng: np.random.Generator) -> None:
     count = 60
-    truth, left, right, measured = _measurements(rng, count, 10, noise=2.0)
+    truth, left, right, measured = _measurements(rng, count, 24, noise=2.0)
     spoiled = measured.copy()
     broken = rng.permutation(len(left))[: len(left) // 8]
     spoiled[broken] = random_rotations(rng, len(broken))
@@ -323,7 +328,7 @@ def test_outliers_are_dropped(rng: np.random.Generator) -> None:
 
 
 def test_the_driver_refuses_nonsense(rng: np.random.Generator) -> None:
-    _, left, right, measured = _measurements(rng, 10, 3)
+    _, left, right, measured = _measurements(rng, 10, 8)
     with pytest.raises(ValueError, match='two particles'):
         synchronize_rotations(1, left, right, measured, np.ones(len(left)))
     with pytest.raises(ValueError, match='one pair'):
@@ -344,7 +349,7 @@ def test_shifts_are_recovered(rng: np.random.Generator) -> None:
     truth = random_rotations(rng, count)
     centres = rng.normal(0.0, 3.0, size=(count, 3))
     centres -= centres.mean(axis=0)
-    left, right = build_pairs(count, 6, rng)
+    left, right = build_pairs(count, 15, rng)
 
     relative = truth[left] @ np.swapaxes(truth[right], -2, -1)
     measured = centres[left] - np.einsum('pij,pj->pi', relative, centres[right])
@@ -366,7 +371,7 @@ def test_shifts_fix_the_gauge(rng: np.random.Generator) -> None:
     count = 30
     truth = random_rotations(rng, count)
     centres = rng.normal(0.0, 2.0, size=(count, 3))
-    left, right = build_pairs(count, 5, rng)
+    left, right = build_pairs(count, 12, rng)
     relative = truth[left] @ np.swapaxes(truth[right], -2, -1)
     measured = centres[left] - np.einsum('pij,pj->pi', relative, centres[right])
 
@@ -394,7 +399,7 @@ def test_shifts_survive_noise(rng: np.random.Generator) -> None:
     truth = random_rotations(rng, count)
     centres = rng.normal(0.0, 3.0, size=(count, 3))
     centres -= centres.mean(axis=0)
-    left, right = build_pairs(count, 8, rng)
+    left, right = build_pairs(count, 20, rng)
     relative = truth[left] @ np.swapaxes(truth[right], -2, -1)
     measured = centres[left] - np.einsum('pij,pj->pi', relative, centres[right])
     measured = measured + rng.normal(0.0, 0.3, size=measured.shape)
@@ -409,7 +414,7 @@ def test_weights_tilt_the_fit(rng: np.random.Generator) -> None:
     truth = random_rotations(rng, count)
     centres = rng.normal(0.0, 2.0, size=(count, 3))
     centres -= centres.mean(axis=0)
-    left, right = build_pairs(count, 6, rng)
+    left, right = build_pairs(count, 15, rng)
     relative = truth[left] @ np.swapaxes(truth[right], -2, -1)
     measured = centres[left] - np.einsum('pij,pj->pi', relative, centres[right])
 
@@ -427,7 +432,7 @@ def test_shift_synchronization_refuses_nonsense(
 ) -> None:
     count = 10
     truth = random_rotations(rng, count)
-    left, right = build_pairs(count, 3, rng)
+    left, right = build_pairs(count, 8, rng)
     shifts = np.zeros((len(left), 3))
 
     with pytest.raises(ValueError, match='each pair'):
@@ -448,7 +453,7 @@ def test_everything_together(rng: np.random.Generator) -> None:
     truth = random_rotations(rng, count)
     centres = rng.normal(0.0, 2.0, size=(count, 3))
     centres -= centres.mean(axis=0)
-    left, right = build_pairs(count, 8, rng)
+    left, right = build_pairs(count, 20, rng)
 
     relative = truth[left] @ np.swapaxes(truth[right], -2, -1)
     from frmony.geometry import exponential_map

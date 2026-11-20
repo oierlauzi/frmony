@@ -176,3 +176,22 @@ def test_bridges_of_a_broken_graph_are_per_piece() -> None:
     left = np.array([0, 2])
     right = np.array([1, 3])
     assert sorted(bridges(4, left, right).tolist()) == [0, 1]
+
+
+@pytest.mark.parametrize(
+    ('count', 'partners'), [(200, 16), (1000, 150), (3000, 40), (500, 100)]
+)
+def test_a_particle_gets_about_the_partners_asked_for(
+    count: int, partners: int
+) -> None:
+    # A pair is a partner to both of its ends. Counting it for one of them
+    # only gave each particle between two and a half and three times what
+    # was asked for, which nothing noticed until a run on real data took
+    # that many times longer than it should have. Measured after: between
+    # 0.83 and 0.96 of the request, the shortfall being pairs that the two
+    # generators both chose.
+    rng = np.random.default_rng(0)
+    left, right = build_pairs(count, partners, rng)
+    degree = np.bincount(np.concatenate((left, right)), minlength=count)
+    assert 0.75 * partners < degree.mean() <= partners
+    assert degree.max() < 1.5 * partners

@@ -20,30 +20,38 @@ from numpy.typing import NDArray
 __all__ = ['bridges', 'build_pairs', 'is_connected', 'spanning_tree']
 
 
-def _ring_pairs(count: int, partners: int) -> set[tuple[int, int]]:
-    """Pairs that link each particle to others at log-spaced distances."""
+def _ring_pairs(count: int, jumps: int) -> set[tuple[int, int]]:
+    """Pairs that link each particle to others at log-spaced distances.
+
+    Each particle reaches ``jumps`` others ahead of it and is reached by
+    as many from behind, so this gives it about twice ``jumps`` partners.
+    """
     if count < 2:
         return set()
     half = max(count // 2, 1)
-    exponents = np.linspace(0.0, 1.0, max(partners, 1))
-    jumps = np.unique(np.round(half**exponents).astype(np.int64))
-    jumps = jumps[jumps > 0]
+    exponents = np.linspace(0.0, 1.0, max(jumps, 1))
+    distances = np.unique(np.round(half**exponents).astype(np.int64))
+    distances = distances[distances > 0]
     pairs = set()
     for index in range(count):
-        for jump in jumps:
-            other = (index + int(jump)) % count
+        for distance in distances:
+            other = (index + int(distance)) % count
             if other != index:
                 pairs.add((min(index, other), max(index, other)))
     return pairs
 
 
 def _random_pairs(
-    count: int, partners: int, rng: np.random.Generator
+    count: int, draws: int, rng: np.random.Generator
 ) -> set[tuple[int, int]]:
-    """Pairs that link each particle to about ``partners`` others at random."""
-    if count < 2 or partners < 1:
+    """Pairs that link each particle to ``draws`` others at random.
+
+    Each particle is also drawn by about as many others, so this gives it
+    about twice ``draws`` partners.
+    """
+    if count < 2 or draws < 1:
         return set()
-    first = np.repeat(np.arange(count), max(partners // 2, 1))
+    first = np.repeat(np.arange(count), draws)
     second = (first + rng.integers(1, count, len(first))) % count
     stacked = np.sort(np.stack((first, second), axis=1), axis=1)
     return {(int(a), int(b)) for a, b in stacked}
@@ -83,7 +91,16 @@ def build_pairs(
         first, second = np.triu_indices(count, 1)
         return first.astype(np.int64), second.astype(np.int64)
 
-    pairs = _ring_pairs(count, partners) | _random_pairs(count, partners, rng)
+    # A pair is a partner to both of its ends, so a particle that reaches
+    # out to some number of others ends up with twice that many. Handing
+    # the whole of ``partners`` to the ring and half of it again to the
+    # random pairs, which is what this did, gave each particle between
+    # two and a half and three times what was asked for: 48 for 16, and
+    # 380 for 150 of ten thousand. Half the partners come from each
+    # generator, and each generator reaches out to half of its share.
+    jumps = max(partners // 4, 1)
+    draws = max((partners - 2 * jumps) // 2, 0)
+    pairs = _ring_pairs(count, jumps) | _random_pairs(count, draws, rng)
     ordered = np.array(sorted(pairs), dtype=np.int64)
     return ordered[:, 0], ordered[:, 1]
 
