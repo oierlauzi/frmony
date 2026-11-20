@@ -7,8 +7,8 @@ group synchronization.
 
 ---
 
-`frmony` builds a structure from cryo-electron tomograms with no reference
-to start from.
+`frmony` reconstructs an average volume from cryo-electron subtomograms with 
+no reference to start from.
 
 The usual route — refine against a growing average — needs something to
 begin with, and tends to find whatever it was given. `frmony` takes the
