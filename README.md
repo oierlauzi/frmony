@@ -19,14 +19,6 @@ measurements at once. Orthogonal group synchronization gives the rotations.
 Linear least squares gives the centres. Nothing is ever compared against a
 reference, so no reference can bias the result.
 
-A tomogram does not measure every frequency. The tilt range leaves a wedge
-of Fourier space empty. The contrast transfer function crosses zero at
-frequencies of its own. `frmony` treats both as one non-negative weight in
-Fourier space, saying how much of each frequency reached the subtomogram.
-The weight only ever multiplies. Nothing divides by it. That matters,
-because it is exactly zero across the wedge and at every zero of the
-transfer function.
-
 > `frmony` is young. Its API may change between minor releases until 1.0.
 
 ## Installing
