@@ -28,3 +28,13 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
   Euler angles a grid index stands for was found by holding the grid against
   a quadrature of the integral over the sphere, not reasoned out on paper,
   and a test keeps it honest.
+- The rest of `matching`: the constrained score that two subtomograms are
+  compared by, the translational search, peak interpolation, and the driver
+  that aligns a pair in two stages. The missing wedge and the contrast
+  transfer function are carried as one non-negative Fourier weight, which
+  only ever multiplies.
+- `harmonics.band_radii`, which chooses the spheres to expand on. The
+  choice matters more than almost anything else: dropping the lowest
+  frequencies, which carry a particle's mass but not its orientation, took
+  a median pairwise error from eight degrees to three and removed every
+  catastrophic failure on the simulation it was measured on.

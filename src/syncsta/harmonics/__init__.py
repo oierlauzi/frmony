@@ -12,12 +12,18 @@ rotational correlation become one inverse FFT.
 """
 
 from .legendre import gauss_legendre, legendre_table, orders
-from .shells import sample_shells, shell_directions, shell_grid
+from .shells import (
+    band_radii,
+    sample_shells,
+    shell_directions,
+    shell_grid,
+)
 from .transform import Basis, expand, expand_shells, make_basis
 from .wigner import half_turn_table, wigner_d
 
 __all__ = [
     'Basis',
+    'band_radii',
     'expand',
     'expand_shells',
     'gauss_legendre',
