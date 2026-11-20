@@ -24,6 +24,7 @@ import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 
+from .._transfers import to_device
 from .correlation import Expansion, rotation_score
 from .peaks import refine_peak, top_peaks
 from .translation import frequency_grid, shift_correlation
@@ -169,9 +170,9 @@ def align_pair(
     Returns:
         The best rotation, shift and score found.
     """
-    left_data = jnp.asarray(left_data)
+    left_data = to_device(left_data)
     size = left_data.shape[-1]
-    grid = jnp.asarray(frequency_grid(size))
+    grid = to_device(frequency_grid(size))
     mask = _shift_mask(size, settings.max_shift)
 
     matrices, _ = candidate_rotations(left, right, settings)
@@ -228,12 +229,12 @@ def align_pairs(
     Returns:
         An `Alignment` whose fields are batched over the pairs.
     """
-    volumes = jnp.asarray(data)
-    weights = jnp.asarray(weight)
+    volumes = to_device(data)
+    weights = to_device(weight)
     # The leaves are indexed by a traced index below, so they have to
     # be on the device already; a NumPy leaf would be asked to turn a
     # tracer into an array.
-    batched = jax.tree.map(jnp.asarray, expansions)
+    batched = jax.tree.map(to_device, expansions)
     first_index = jnp.asarray(left)
     second_index = jnp.asarray(right)
 

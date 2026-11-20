@@ -10,6 +10,11 @@ Two come built in. ``relion`` reads a RELION particle table, four or five,
 telling them apart by their columns rather than by being told. ``mrc``
 takes a plain list of volumes, one path a line, with the missing region
 named separately.
+
+Both take a root, the directory that the paths inside are relative to.
+RELION writes them relative to the project, which is not always where the
+table itself ended up, so a table that has been moved or copied needs to
+be told where its images stayed.
 """
 
 from __future__ import annotations
@@ -40,11 +45,17 @@ class Source:
     """Which reader produced this."""
 
 
-_READERS: dict[str, Callable[[Path], Source]] = {}
+Reader = Callable[[Path, Path | None], Source]
+
+_READERS: dict[str, Reader] = {}
 
 
-def register(name: str, reader: Callable[[Path], Source]) -> None:
-    """Add a format, or replace one."""
+def register(name: str, reader: Reader) -> None:
+    """Add a format, or replace one.
+
+    A reader takes the path of the table and the root that the paths
+    inside it are relative to, which is None when the caller did not say.
+    """
     _READERS[name] = reader
 
 
@@ -53,10 +64,10 @@ def available() -> tuple[str, ...]:
     return tuple(sorted(_READERS))
 
 
-def _read_relion(path: Path) -> Source:
+def _read_relion(path: Path, root: Path | None) -> Source:
     from .star import read_star
 
-    metadata = read_star(path)
+    metadata = read_star(path, root)
     _LOGGER.info(
         'Read %d particles from a %s table.', len(metadata), metadata.version
     )
@@ -69,7 +80,7 @@ def _read_relion(path: Path) -> Source:
     )
 
 
-def _read_mrc(path: Path) -> Source:
+def _read_mrc(path: Path, root: Path | None) -> Source:
     lines = [
         line.strip()
         for line in Path(path).read_text().splitlines()
@@ -77,9 +88,9 @@ def _read_mrc(path: Path) -> Source:
     ]
     if not lines:
         raise ValueError(f'{path} names no volumes.')
-    root = Path(path).parent
+    base = Path(root) if root is not None else Path(path).parent
     resolved = [
-        str(root / line) if not Path(line).is_absolute() else line
+        str(base / line) if not Path(line).is_absolute() else line
         for line in lines
     ]
     return Source(data=resolved, weights=None, pixel_size=None, format='mrc')
@@ -89,18 +100,29 @@ register('relion', _read_relion)
 register('mrc', _read_mrc)
 
 
-def read_source(path: str | Path, format: str | None = None) -> Source:
+def read_source(
+    path: str | Path,
+    format: str | None = None,
+    root: str | Path | None = None,
+) -> Source:
     """Find the subtomograms a path names.
 
     Args:
         path: A RELION particle table, or a list of volumes.
         format: Which reader to use. Chosen from the suffix if not given:
             ``.star`` is RELION and anything else is a list.
+        root: Directory that the paths inside are relative to. The table's
+            own directory if not given, which is right when the table is
+            still where it was written and wrong as soon as it is copied
+            somewhere else.
 
     Raises:
-        ValueError: If the format is not one that is registered.
+        ValueError: If the format is not one that is registered, or if the
+            root is not a directory.
     """
     path = Path(path)
+    if root is not None and not Path(root).is_dir():
+        raise ValueError(f'{root} is not a directory to find images under.')
     if format is None:
         format = 'relion' if path.suffix.lower() == '.star' else 'mrc'
     if format not in _READERS:
@@ -109,4 +131,4 @@ def read_source(path: str | Path, format: str | None = None) -> Source:
             + ', '.join(available())
             + '.'
         )
-    return _READERS[format](path)
+    return _READERS[format](path, Path(root) if root is not None else None)

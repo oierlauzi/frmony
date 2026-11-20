@@ -335,7 +335,7 @@ def test_a_format_can_be_added(tmp_path: Path) -> None:
 
     register(
         'invented',
-        lambda path: Source(
+        lambda path, root: Source(
             data=['a.mrc'], weights=None, pixel_size=2.5, format='invented'
         ),
     )
@@ -370,3 +370,47 @@ def test_a_spectrum_is_written_as_its_volume(tmp_path: Path) -> None:
     write_spectrum(path, spectrum, 1.5)
     with mrcfile.open(str(path)) as handle:
         np.testing.assert_allclose(handle.data, volume, atol=1e-5)
+
+
+def test_a_root_finds_images_that_moved(
+    tmp_path: Path, rng: np.random.Generator
+) -> None:
+    """RELION writes image paths relative to the project, not to the table.
+
+    A table copied away from its project cannot find its images, and the
+    root is how it is told where they stayed.
+    """
+    images = tmp_path / 'images'
+    images.mkdir()
+    original = _write_relion(images, rng, 3, 'relion5')
+
+    copied = tmp_path / 'copied.star'
+    copied.write_text(original.read_text().replace(str(images) + '/', ''))
+
+    beside = read_source(copied)
+    assert not Path(beside.data[0]).exists()
+
+    told = read_source(copied, root=images)
+    assert all(Path(name).exists() for name in told.data)
+    assert told.weights is not None
+    assert all(Path(name).exists() for name in told.weights)
+
+
+def test_a_root_applies_to_a_listing_too(tmp_path: Path) -> None:
+    images = tmp_path / 'vols'
+    images.mkdir()
+    for index in range(2):
+        write_map(images / f'v{index}.mrc', np.zeros((8,) * 3), 1.0)
+    listing = tmp_path / 'volumes.txt'
+    listing.write_text('v0.mrc\nv1.mrc\n')
+
+    assert not Path(read_source(listing).data[0]).exists()
+    told = read_source(listing, root=images)
+    assert all(Path(name).exists() for name in told.data)
+
+
+def test_a_root_that_is_not_a_directory_is_refused(tmp_path: Path) -> None:
+    listing = tmp_path / 'volumes.txt'
+    listing.write_text('v0.mrc\n')
+    with pytest.raises(ValueError, match='not a directory'):
+        read_source(listing, root=tmp_path / 'nowhere')

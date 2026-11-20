@@ -24,6 +24,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax.typing import ArrayLike
 
+from .._transfers import to_device
 from .legendre import quadrature_table
 from .shells import sample_shells, shell_grid
 
@@ -113,10 +114,12 @@ def make_basis(
     spacing = np.gradient(shells) if len(shells) > 1 else np.ones(1)
     weight = np.sqrt(np.abs(shells * shells * spacing))
 
+    # The one crossing a basis makes. Everything after it reads these
+    # from the device.
     return Basis(
-        grid=jnp.asarray(grid),
-        colatitude=jnp.asarray(colatitude),
-        radial=jnp.asarray(weight),
+        grid=to_device(grid),
+        colatitude=to_device(colatitude),
+        radial=to_device(weight),
         bandwidth=bandwidth,
         azimuths=azimuths,
     )

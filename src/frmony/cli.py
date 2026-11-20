@@ -71,6 +71,13 @@ def _add_run(commands: Any, shared: argparse.ArgumentParser) -> None:
         help='How the input is laid out. Guessed from its suffix if not given.',
     )
     parser.add_argument(
+        '--root',
+        help='Directory the image paths inside the input are relative to. '
+        "The input's own directory if not given. RELION writes those paths "
+        'relative to the project, so a table copied away from its project '
+        'needs this to find the images.',
+    )
+    parser.add_argument(
         '--partners',
         type=_count,
         default=16,
@@ -159,8 +166,11 @@ def _add_run(commands: Any, shared: argparse.ArgumentParser) -> None:
     parser.add_argument(
         '--batch',
         type=_count,
-        default=4,
-        help='Pairs aligned at once (default: %(default)s).',
+        default=32,
+        help='Pairs aligned at once, and particles expanded at once '
+        '(default: %(default)s). Turn it down if the device runs out of '
+        'memory, up if it is idle. A batch needs roughly '
+        'batch * candidates * band^3 * 8 bytes, times a small constant.',
     )
     parser.add_argument(
         '--seed', type=int, default=0, help='Which pairs get chosen.'
@@ -181,6 +191,7 @@ def _run_pipeline(
     input: str,
     output: str,
     format: str | None,
+    root: str | None,
     partners: int,
     bandwidth: int,
     candidates: int,
@@ -211,7 +222,7 @@ def _run_pipeline(
 
     logger = logging.getLogger(__name__)
     with jax.default_device(resolve_device(device)):
-        source = read_source(input, format)
+        source = read_source(input, format, root)
         size = pixel_size or source.pixel_size
         if size is None:
             raise ValueError(

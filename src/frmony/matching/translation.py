@@ -23,6 +23,8 @@ import jax.numpy as jnp
 import numpy as np
 from jax.typing import ArrayLike
 
+from .._transfers import to_device
+
 __all__ = [
     'frequency_grid',
     'rotate_spectrum',
@@ -61,9 +63,9 @@ def rotate_spectrum(
     Returns:
         The turned volume, of the same shape.
     """
-    volume = jnp.asarray(volume)
-    rotation = jnp.asarray(rotation)
-    grid = jnp.asarray(grid)
+    volume = to_device(volume)
+    rotation = to_device(rotation)
+    grid = to_device(grid)
     size = volume.shape[-1]
 
     # Q.T applied to every offset, in full precision: a GPU's default
@@ -131,8 +133,8 @@ def shift_correlation(
         The score at every shift, ``(size, size, size)`` and centred so
         that index ``size // 2`` is no shift, and the common denominator.
     """
-    left_data = jnp.asarray(left_data)
-    left_weight = jnp.asarray(left_weight)
+    left_data = to_device(left_data)
+    left_weight = to_device(left_weight)
 
     turned = rotate_spectrum(right_data, rotation, grid)
     turned_weight = rotate_spectrum(right_weight, rotation, grid)

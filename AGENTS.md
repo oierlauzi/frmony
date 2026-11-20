@@ -51,6 +51,13 @@ of the `r**2 dr` into the coefficients, so the three-dimensional
 correlation is a plain sum over shells. Anything that integrates the radial
 direction itself has to divide it back out. `matching/frm5d.py` does.
 
+**Every copy between host and device is named.** `_transfers.to_device`
+and `to_host` are the only two places data crosses. Writing
+`jnp.asarray` on a NumPy array, or `np.asarray` on a device array, does it
+quietly instead, and `tests/test_transfers.py` fails when something does.
+Reach for `record_transfers` when a device looks busier than the work
+should make it.
+
 **Precision is single.** JAX defaults to float32 and the package does not
 change that. Tolerances around `1e-6` are the floor, not sloppiness. Also,
 `arccos` near a zero angle loses half its digits, so an angular error that
@@ -109,6 +116,14 @@ pairs in ten past thirty. `harmonics.band_radii` drops them, and says so.
 which no degree below the bandwidth reaches. Slicing a longer FFT down has
 to leave that slot empty, or every negative order shifts by one.
 
+**A traced constant reads as an implicit copy.** A table a traced
+function closes over, such as the quarter-turn matrices, is folded into
+the compiled program and uploaded by the runtime rather than through a
+`device_put`. So it is reported as implicit however it was written. That
+happens once per compiled function, not once per pair, which is why the
+transfer tests assert on shapes rather than on counts: a count depends on
+what else compiled first.
+
 **The two FRM papers conjugate different operands.** The 2002 paper
 conjugates the second function, the 2003 paper the first. So
 `matching.frm5d.two_centre_integrals` comes out as the *conjugate* of
@@ -150,6 +165,8 @@ Do not claim otherwise in documentation or commit messages.
   not dispatch to it.
 - The loader reads volumes one at a time. It does not overlap reads with
   computation.
+- Nothing has run on a GPU. The batch default and the memory formula in
+  `pipeline.Design` are reasoned, not measured.
 
 ## Style
 

@@ -28,6 +28,7 @@ import numpy as np
 from jax.typing import ArrayLike
 from numpy.typing import NDArray
 
+from ._transfers import to_device
 from .matching.translation import frequency_grid, rotate_spectrum
 
 __all__ = ['average', 'fourier_shell_correlation', 'resolution_at']
@@ -72,12 +73,12 @@ def average(
         of its frequencies. The second is worth keeping: it says which
         parts of the answer are supported and which are guesses.
     """
-    data = jnp.asarray(data)
-    weight = jnp.asarray(weight)
-    rotations = jnp.asarray(rotations)
-    shifts = jnp.asarray(shifts)
+    data = to_device(data)
+    weight = to_device(weight)
+    rotations = to_device(rotations)
+    shifts = to_device(shifts)
     size = data.shape[-1]
-    grid = jnp.asarray(frequency_grid(size))
+    grid = to_device(frequency_grid(size))
 
     def one(inputs: tuple[jax.Array, ...]) -> tuple[jax.Array, jax.Array]:
         spectrum, mask, rotation, shift = inputs

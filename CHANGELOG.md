@@ -8,6 +8,13 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 First release.
 
+### Changed
+
+- A format reader registered with `io.register` now takes the root as a
+  second argument.
+- `Design.batch` defaults to 32 rather than 4, which was chosen for a
+  laptop and leaves a GPU waiting on dispatch.
+
 ### Added
 
 - The skeleton of the package: packaging, linting, type checking, tests and
@@ -63,6 +70,13 @@ First release.
   radial overlap. Which rotations a grid index stands for is not yet
   settled, so this is not yet an engine `pairwise` can dispatch to; the
   module says so.
+- `_transfers`, which gives every copy between host and device a name,
+  and `record_transfers` to count them. The particles now cross once as a
+  set: expanding them in a Python loop sent each one over, brought its
+  coefficients back and sent those over again, so the copies grew with the
+  number of particles.
+- `--root`, for a STAR file whose images are not beside it. RELION writes
+  those paths relative to the project.
 - `graph.bridges`, and a warning when the pairs that survive rejection
   include one. A connected graph is not enough: two groups held together
   by a single pair come out in unrelated frames while every residual looks

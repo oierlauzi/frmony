@@ -40,6 +40,7 @@ import jax.numpy as jnp
 import jax.scipy.optimize
 from jax.typing import ArrayLike
 
+from .._transfers import to_device
 from .translation import frequency_grid, rotate_spectrum
 
 __all__ = ['exponential_map', 'refine_alignment', 'score_at']
@@ -151,14 +152,15 @@ def refine_alignment(
         improve on what it was given, what it was given comes back, so
         this can never make an alignment worse.
     """
+    here = to_device(left_data)
     refined: tuple[jax.Array, jax.Array, jax.Array] = _refine(
-        jnp.asarray(left_data),
-        jnp.asarray(left_weight),
-        jnp.asarray(right_data),
-        jnp.asarray(right_weight),
-        jnp.asarray(rotation, dtype=jnp.float32),
-        jnp.asarray(shift, dtype=jnp.float32),
-        jnp.asarray(frequency_grid(jnp.asarray(left_data).shape[-1])),
+        here,
+        to_device(left_weight),
+        to_device(right_data),
+        to_device(right_weight),
+        to_device(rotation, dtype=jnp.float32),
+        to_device(shift, dtype=jnp.float32),
+        to_device(frequency_grid(here.shape[-1])),
         max_iterations,
         epsilon,
     )

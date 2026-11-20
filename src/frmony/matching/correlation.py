@@ -40,6 +40,7 @@ import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 
+from .._transfers import to_device
 from ..harmonics.transform import Basis, expand
 from .rotation import correlation_grid, radial_overlap
 
@@ -80,8 +81,8 @@ def expand_particle(
         weight: Its non-negative Fourier weight, the same shape.
         basis: What `frmony.harmonics.make_basis` built.
     """
-    data = jnp.asarray(data)
-    weight = jnp.maximum(jnp.asarray(weight), 0.0)
+    data = to_device(data)
+    weight = jnp.maximum(to_device(weight), 0.0)
     amplitude = jnp.abs(data)
     return Expansion(
         amplitude=expand(amplitude * weight, basis),

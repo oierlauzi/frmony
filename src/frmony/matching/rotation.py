@@ -30,6 +30,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax.typing import ArrayLike
 
+from .._transfers import to_device
 from ..harmonics.legendre import orders
 from ..harmonics.wigner import half_turn_table
 
@@ -68,8 +69,8 @@ def radial_overlap(left: ArrayLike, right: ArrayLike) -> jax.Array:
         ``(bandwidth, 2 * bandwidth, 2 * bandwidth)``, indexed by degree and
         then by the order taken from each side.
     """
-    left = jnp.asarray(left)
-    right = jnp.asarray(right)
+    left = to_device(left)
+    right = to_device(right)
     if left.shape != right.shape:
         raise ValueError(
             f'Coefficients of shapes {left.shape} and {right.shape} are not '
@@ -118,10 +119,12 @@ def correlation_grid(overlap: ArrayLike, bandwidth: int) -> jax.Array:
     Returns:
         A real array ``(2B, 2B, 2B)``.
     """
-    overlap = jnp.asarray(overlap)
+    overlap = to_device(overlap)
     size = 2 * bandwidth
-    quarter = jnp.asarray(half_turn_table(bandwidth), dtype=overlap.dtype)
-    phase = jnp.asarray(_phases(bandwidth), dtype=overlap.dtype)
+    # Under a trace these cross once and become constants. Called eagerly
+    # they cross per call, which is why they are small.
+    quarter = to_device(half_turn_table(bandwidth), dtype=overlap.dtype)
+    phase = to_device(_phases(bandwidth), dtype=overlap.dtype)
 
     # The i**(n - m) the identity leaves over, split between the two sides.
     weighted = (

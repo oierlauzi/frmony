@@ -26,6 +26,7 @@ import numpy as np
 from jax.typing import ArrayLike
 from numpy.typing import NDArray
 
+from .._transfers import to_device
 from .legendre import gauss_legendre
 
 __all__ = [
@@ -98,8 +99,8 @@ def sample_shells(
     Returns:
         The values at the grid, of shape ``grid.shape[1:]``.
     """
-    volume = jnp.asarray(volume)
-    grid = jnp.asarray(grid)
+    volume = to_device(volume)
+    grid = to_device(grid)
     if volume.ndim != 3:
         raise ValueError('A shell is read off a three-dimensional volume.')
     coordinates = [grid[axis] for axis in range(3)]

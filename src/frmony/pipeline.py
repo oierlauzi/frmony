@@ -20,6 +20,7 @@ import jax
 import numpy as np
 from numpy.typing import NDArray
 
+from ._transfers import to_device, to_host
 from .averaging import average, fourier_shell_correlation, resolution_at
 from .graph import bridges, build_pairs, is_connected
 from .harmonics.shells import band_radii
@@ -66,9 +67,18 @@ class Design:
     symmetry. None keeps every pair."""
     seed: int = 0
     """Which pairs get chosen."""
-    batch: int = 4
-    """Pairs aligned at once. Larger is faster until the device runs out of
-    room."""
+    batch: int = 32
+    """Pairs aligned at once, and particles expanded at once.
+
+    This is the number to turn down when a device runs out of memory, and
+    the number to turn up when it is idle. The working set of a batch is
+    about
+
+        batch * candidates * band**3 * 8 bytes
+
+    times a small constant for the temporaries, so a batch of 32 with ten
+    candidates on a band of 52 is around three gigabytes. Four, which this
+    used to be, will leave a GPU waiting on dispatch."""
     refine: bool = False
     """Polish each pair against the score itself after the grid search.
     Off by default; `frmony.matching.refine` says why."""
@@ -160,16 +170,22 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
         subtomograms.band,
         sampling_bandwidth=2 * design.bandwidth,
     )
+    # The one crossing the particles make. Everything after this reads
+    # them from the device, so a thousand particles cost one copy and not
+    # a thousand. Expanding them in a Python loop instead, which is what
+    # this used to do, sent each particle over and brought its
+    # coefficients back, and then sent those over again to align with.
     started = time.perf_counter()
-    expansions = jax.tree.map(
-        lambda *leaves: np.stack(leaves),
-        *[
-            expand_particle(
-                subtomograms.data[index], subtomograms.weight[index], basis
-            )
-            for index in range(count)
-        ],
+    data = to_device(subtomograms.data)
+    weight = to_device(subtomograms.weight)
+    expansions = jax.lax.map(
+        lambda particle: expand_particle(particle[0], particle[1], basis),
+        (data, weight),
+        batch_size=max(design.batch, 1),
     )
+    # The timing above means nothing without this: JAX dispatches
+    # asynchronously, so the loop returns before the work is done.
+    jax.tree.map(lambda leaf: leaf.block_until_ready(), expansions)
     _LOGGER.info(
         'Expanded %d particles in %.1f s.', count, time.perf_counter() - started
     )
@@ -181,8 +197,8 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
     )
     started = time.perf_counter()
     aligned = align_pairs(
-        subtomograms.data,
-        subtomograms.weight,
+        data,
+        weight,
         expansions,
         left,
         right,
@@ -197,9 +213,9 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
         1e3 * elapsed / max(len(left), 1),
     )
 
-    measurements = np.asarray(aligned.rotation, dtype=np.float64)
-    measured_shifts = np.asarray(aligned.shift, dtype=np.float64)
-    scores = np.asarray(aligned.score, dtype=np.float64)
+    measurements = to_host(aligned.rotation, dtype=np.float64)
+    measured_shifts = to_host(aligned.shift, dtype=np.float64)
+    scores = to_host(aligned.score, dtype=np.float64)
 
     if design.refine:
         started = time.perf_counter()
@@ -212,8 +228,8 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
                 measurements[index],
                 measured_shifts[index],
             )
-            measurements[index] = np.asarray(turn, dtype=np.float64)
-            measured_shifts[index] = np.asarray(offset, dtype=np.float64)
+            measurements[index] = to_host(turn, dtype=np.float64)
+            measured_shifts[index] = to_host(offset, dtype=np.float64)
             scores[index] = float(value)
         _LOGGER.info(
             'Refined %d pairs in %.1f s.',
@@ -290,18 +306,13 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
         weights[kept],
     )
 
-    structure, support = average(
-        subtomograms.data, subtomograms.weight, orientations, centres
-    )
+    structure, support = average(data, weight, orientations, centres)
     halves = []
     for half in (np.arange(count) % 2 == 0, np.arange(count) % 2 == 1):
         part, _ = average(
-            subtomograms.data[half],
-            subtomograms.weight[half],
-            orientations[half],
-            centres[half],
+            data[half], weight[half], orientations[half], centres[half]
         )
-        halves.append(np.asarray(part))
+        halves.append(to_host(part))
     frequency, correlation = fourier_shell_correlation(halves[0], halves[1])
     # The band was cropped, so a shell's frequency is a fraction of the
     # cropped sampling rate; the pixel size that goes with it is coarser
@@ -321,8 +332,8 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
         measured_shifts=measured_shifts,
         residuals=synchronized.residuals,
         kept=kept,
-        structure=np.asarray(structure),
-        support=np.asarray(support),
+        structure=to_host(structure),
+        support=to_host(support),
         frequency=frequency,
         correlation=correlation,
         resolution=resolution,
