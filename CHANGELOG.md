@@ -23,3 +23,8 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
   rather than by a uniform grid with a `sin(theta)` weight, which is not
   exact at any number of nodes. It also builds the quarter-turn Wigner
   matrices, as the exponential of the generator of rotations about y.
+- `matching.rotation`, the fast rotational matching itself: one inverse FFT
+  gives the correlation of two expansions at every rotation of a grid. Which
+  Euler angles a grid index stands for was found by holding the grid against
+  a quadrature of the integral over the sphere, not reasoned out on paper,
+  and a test keeps it honest.
