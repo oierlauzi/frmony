@@ -111,6 +111,38 @@ frequencies carry a particle's mass and not its orientation. Leaving them
 in took a median pairwise error from three degrees to eight and sent four
 pairs in ten past thirty. `harmonics.band_radii` drops them, and says so.
 
+**Amplitudes are not enough under noise.** The first stage on `|D|` put
+the right rotation at the sixty-third percentile of its grid on real
+subtomograms, where chance is the fiftieth. Centring the amplitudes,
+standardising them shell by shell and using the power instead all left it
+there. The reason is the order of the signal: a product of two noisy
+spectra has an expectation that goes as the signal squared, and a product
+of their amplitudes one that goes as its fourth power. `Design.phases`
+expands `D` itself. Do not expect a better normalization of the amplitudes
+to save them.
+
+**One model for every input.** A spectrum comes with a transfer `W`, and
+is `W S` plus noise of variance `W`. `particles.whiten` divides it by the
+square root, above a floor, which leaves the weight times the structure
+plus white noise. A wedge of ones and zeros and a clean volume go through
+it unchanged, so there is no branch on where a particle came from. Do not
+add one. RELION's weight file is the transfer as it stands, not its square
+root: the pseudo-subtomogram is a sum of tilts each multiplied by its own
+transfer. Without the whitening the tilt axis, which every tilt contains,
+decides every correlation.
+
+**A model of the variance fitted to the data did not work.** Weighting a
+pair by the transfer over a variance of `P W**2 + s W`, fitted shell by
+shell, aligned four pairs in a hundred where whitening aligned thirty
+seven. The fit puts all of the variance in the second term, which says the
+plain correlation is already the matched filter, and the plain correlation
+aligned eleven. Nobody knows why yet.
+
+**Whose weight goes in the denominator matters.** With the same numerator,
+normalizing each particle's energy by its own weight over the region both
+measured aligned 37 pairs in a hundred. Letting the partner's weight into
+it aligned 29.
+
 **The Nyquist column.** `fftfreq(2B)` lays the orders out as
 `0 .. B-1, -B, -(B-1) .. -1`. The column at index `B` is the order `-B`,
 which no degree below the bandwidth reaches. Slicing a longer FFT down has
@@ -154,19 +186,27 @@ rather than of the simulation.
 
 Do not claim otherwise in documentation or commit messages.
 
-- The STAR output has never been checked against RELION. Whether RELION
-  reads an orientation as this one or its inverse, and whether it adds or
-  subtracts the origin, is untested. Both would be silent if wrong.
-- Accuracy has only been measured on simulated data. It holds to a signal
-  to noise ratio of about one and breaks down near a tenth of that. The
-  package has not been run on real data.
+- The origins of the STAR output have never been checked against RELION.
+  The angles agree with a refinement up to one global rotation. Whether
+  RELION adds or subtracts the origin is untested, and would be silent if
+  wrong.
+- Accuracy on real data has been measured on one dataset, EMPIAR-10304,
+  with particles that were already centred. How `Design.phases` holds up
+  when they are not is unmeasured.
+- The half-set correlation is not independent. The halves are aligned
+  together.
+- The second stage picks among the candidates slightly worse than the
+  first stage ranked them, 29 right in a hundred against 37. Why is not
+  known.
 - `matching/frm5d.py` has the mathematics but not the map from a grid index
   back to a pair of rotations. It is not an engine yet, and `matching` does
   not dispatch to it.
 - The loader reads volumes one at a time. It does not overlap reads with
   computation.
-- Nothing has run on a GPU. The batch default and the memory formula in
-  `pipeline.Design` are reasoned, not measured.
+- The memory formula in `pipeline.Design` is reasoned, not measured. What
+  is measured: 10357 particles in a band of 38 fit on a 32 GB device and
+  align at about half a millisecond a pair. Two runs at once do not fit,
+  since each takes most of the device for itself.
 
 ## Style
 

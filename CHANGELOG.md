@@ -4,6 +4,32 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+The first run on real data, EMPIAR-10304.
+
+### Fixed
+
+- `graph.build_pairs` gave each particle between two and a half and three
+  times the partners asked for.
+- The resolution of every real run came out infinite, because the empty
+  innermost shell of the correlation was reported as zero.
+- RELION pseudo-subtomograms were read as if their noise were white. It
+  has the variance of the weight file. Every input is now read as one
+  model, a spectrum with a transfer `W` and noise of variance `W`, and
+  `particles.whiten` divides it by the square root above a floor. A wedge
+  and a clean volume come through unchanged. A RELION weight is taken as
+  it stands by default, where it used to be its square root.
+- Two particles are compared over the frequencies both measured, and no
+  longer in proportion to their weights.
+- The time a pair took was logged in whole milliseconds, so as zero.
+
+### Added
+
+- `Design.phases` and `--phases`, which keep the phases in the rotational
+  search. Real subtomograms needed it. It is off by default because it
+  needs the particles roughly centred.
+
 ## [0.1.0] - 2026-11-20
 
 First release.

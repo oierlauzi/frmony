@@ -414,3 +414,76 @@ def test_a_root_that_is_not_a_directory_is_refused(tmp_path: Path) -> None:
     listing.write_text('v0.mrc\n')
     with pytest.raises(ValueError, match='not a directory'):
         read_source(listing, root=tmp_path / 'nowhere')
+
+
+def test_whitening_makes_the_noise_of_a_summed_particle_white() -> None:
+    # What RELION stores is W S + n with a noise of variance W, where W
+    # is the weight file. Build exactly that, with no signal, and the
+    # whitened spectrum must have the same power wherever anything was
+    # measured, however uneven the transfer. Measured: the ratio of the
+    # power in the heaviest tenth to the lightest is 1.00 after and 30
+    # before.
+    from frmony.particles import whiten
+
+    rng = np.random.default_rng(3)
+    size = 24
+    transfer = rng.uniform(0.05, 4.0, size=(size,) * 3).astype(np.float32)
+    transfer[:, :, : size // 4] = 0.0
+    noise = rng.normal(size=(size,) * 3) + 1j * rng.normal(size=(size,) * 3)
+    stored = (np.sqrt(transfer) * noise).astype(np.complex64)
+
+    spectrum, weight = whiten(stored, transfer)
+
+    assert np.all(spectrum[transfer == 0.0] == 0.0)
+    assert np.all(weight[transfer == 0.0] == 0.0)
+    inside = weight > 0.0
+    np.testing.assert_allclose(
+        weight[inside], np.sqrt(transfer[inside]), rtol=1e-6
+    )
+    order = np.argsort(transfer[inside])
+    power = np.abs(spectrum[inside][order]) ** 2
+    before = np.abs(stored[inside][order]) ** 2
+    tenth = len(power) // 10
+    assert power[-tenth:].mean() / power[:tenth].mean() == pytest.approx(
+        1.0, abs=0.15
+    )
+    assert before[-tenth:].mean() / before[:tenth].mean() > 10.0
+
+
+def test_whitening_leaves_a_wedge_and_a_clean_volume_alone(
+    rng: np.random.Generator,
+) -> None:
+    # One model for every input, with no branch on where a particle came
+    # from, only holds if the inputs that were right already come through
+    # untouched. A transfer of ones and zeros is its own square root.
+    from frmony.particles import whiten
+
+    size = 16
+    stored = (
+        rng.normal(size=(size,) * 3) + 1j * rng.normal(size=(size,) * 3)
+    ).astype(np.complex64)
+    for transfer in (
+        wedge_mask(size, 60.0),
+        np.ones((size,) * 3, dtype=np.float32),
+    ):
+        spectrum, weight = whiten(stored * transfer, transfer)
+        np.testing.assert_array_equal(weight, transfer)
+        np.testing.assert_array_equal(spectrum, stored * transfer)
+
+
+def test_whitening_does_not_divide_by_next_to_nothing() -> None:
+    # The division is bounded: nothing under a ten-thousandth of the
+    # largest transfer is divided by, so a spectrum of ones cannot come
+    # out larger than a hundred.
+    from frmony.particles import whiten
+
+    transfer = np.full((4,) * 3, 1.0, dtype=np.float32)
+    transfer[0] = 1e-9
+    transfer[1] = 4e-4
+    stored = np.ones((4,) * 3, dtype=np.complex64)
+    spectrum, weight = whiten(stored, transfer)
+    assert np.all(spectrum[0] == 0.0)
+    assert np.all(weight[0] == 0.0)
+    assert np.all(np.isfinite(spectrum))
+    assert np.abs(spectrum).max() <= 100.0
+    np.testing.assert_allclose(np.abs(spectrum[1]), 50.0, rtol=1e-5)

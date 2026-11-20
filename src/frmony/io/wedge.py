@@ -114,7 +114,7 @@ def half_to_centred(half: NDArray[np.floating]) -> NDArray[np.float32]:
 
 
 def relion_weight(
-    volume: NDArray[np.floating], transform: str = 'sqrt'
+    volume: NDArray[np.floating], transform: str = 'identity'
 ) -> NDArray[np.float32]:
     """The Fourier weight of a RELION pseudo-subtomogram.
 
@@ -124,18 +124,23 @@ def relion_weight(
     what matters here.
 
     Per tilt, RELION multiplies the data by ``c = CTF * dose weighting``
-    and accumulates ``c * c`` into that first slab. So the data carries one
-    power of the transfer and the file carries two, which is why the
-    default takes a square root: the weight wanted is the amplitude that
-    reached the particle, not its square. For a single tilt that is exact,
-    and for a sum it is close. The square root is safe -- the slab is a sum
-    of squares -- and nothing anywhere divides by it.
+    and accumulates ``c * c`` into that first slab. A tilt already carries
+    one power of the transfer from the microscope, so the data holds the
+    structure times that slab, and noise whose variance is that slab. The
+    slab as it stands is therefore the transfer, and
+    `frmony.particles.whiten` is what turns the pair into a spectrum with
+    white noise and the amplitude it carries.
+
+    This used to take the square root by default and leave the data
+    alone, on the reasoning that the data carries one power of the
+    transfer and the file two. That holds for the noise and not for the
+    signal, and the first real dataset showed it.
 
     Args:
         volume: What the file holds, ``(2 * size, size, size // 2 + 1)``.
-        transform: ``'sqrt'`` as above, ``'identity'`` to take the slab as
-            it stands, or ``'none'`` to ignore it and weight every
-            measured frequency alike.
+        transform: ``'identity'`` to take the slab as it stands,
+            ``'sqrt'`` for its square root, or ``'none'`` to ignore it
+            and weight every measured frequency alike.
 
     Returns:
         A centred weight ``(size, size, size)``.

@@ -133,11 +133,12 @@ def _add_run(commands: Any, shared: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         '--weight-transform',
-        choices=('sqrt', 'identity', 'none'),
-        default='sqrt',
-        help='How to read a RELION weight volume (default: %(default)s). '
-        'RELION accumulates the square of what reached the particle, so '
-        "'sqrt' recovers the amplitude.",
+        choices=('identity', 'sqrt', 'none'),
+        default='identity',
+        help='How to read a RELION weight volume as the transfer of the '
+        "data (default: %(default)s). 'identity' takes it as it stands, "
+        "which is what RELION accumulates. 'none' keeps only where it is "
+        'not zero.',
     )
     parser.add_argument(
         '--mask-radius',
@@ -176,6 +177,14 @@ def _add_run(commands: Any, shared: argparse.ArgumentParser) -> None:
         '--seed', type=int, default=0, help='Which pairs get chosen.'
     )
     parser.add_argument(
+        '--phases',
+        action='store_true',
+        help='Keep the phases in the rotational search. It then needs the '
+        'particles roughly centred, to about a voxel of the analysis '
+        'band, and finds rotations that the amplitudes alone are too '
+        'noisy to. Real subtomograms have needed it.',
+    )
+    parser.add_argument(
         '--refine',
         action='store_true',
         help='Polish each pair against the score itself after the grid '
@@ -208,6 +217,7 @@ def _run_pipeline(
     batch: int,
     seed: int,
     refine: bool,
+    phases: bool,
     device: str | None,
 ) -> None:
     """Run the whole pipeline and write what it found."""
@@ -255,6 +265,7 @@ def _run_pipeline(
             batch=batch,
             seed=seed,
             refine=refine,
+            phases=phases,
         )
         result = run(subtomograms, design)
 

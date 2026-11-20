@@ -82,6 +82,10 @@ class Design:
     refine: bool = False
     """Polish each pair against the score itself after the grid search.
     Off by default; `frmony.matching.refine` says why."""
+    phases: bool = False
+    """Keep the phases in the first, rotational stage. It then needs the
+    particles roughly centred, and finds rotations that the amplitudes
+    are too noisy to; see `frmony.matching.expand_particle`."""
     detect: bool = True
     """Report the symmetry the measurements suggest, whatever was asked
     for."""
@@ -178,9 +182,20 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
     started = time.perf_counter()
     data = to_device(subtomograms.data)
     weight = to_device(subtomograms.weight)
+    # Two particles are compared over the frequencies both measured, and
+    # not in proportion to how well. A weight that follows the transfer
+    # is largest where every tilt overlaps, on the tilt axis and at the
+    # lowest frequencies, which is also where what surrounds the particle
+    # is strongest, and that is not noise the weight knows about. Counting
+    # those frequencies by their weight once more took the pairs aligned
+    # correctly on EMPIAR-10304 from eighteen in a hundred to five. The
+    # average below does use the weight, as it must to undo the transfer.
+    measured = (weight > 0.0).astype(weight.dtype)
     expansions = jax.lax.map(
-        lambda particle: expand_particle(particle[0], particle[1], basis),
-        (data, weight),
+        lambda particle: expand_particle(
+            particle[0], particle[1], basis, design.phases
+        ),
+        (data, measured),
         batch_size=max(design.batch, 1),
     )
     # The timing above means nothing without this: JAX dispatches
@@ -198,7 +213,7 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
     started = time.perf_counter()
     aligned = align_pairs(
         data,
-        weight,
+        measured,
         expansions,
         left,
         right,
@@ -207,7 +222,7 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
     )
     elapsed = time.perf_counter() - started
     _LOGGER.info(
-        'Aligned %d pairs in %.1f s, %.0f ms each.',
+        'Aligned %d pairs in %.1f s, %.2f ms each.',
         len(left),
         elapsed,
         1e3 * elapsed / max(len(left), 1),

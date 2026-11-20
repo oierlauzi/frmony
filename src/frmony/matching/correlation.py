@@ -57,7 +57,8 @@ class Expansion:
     """
 
     amplitude: jax.Array
-    """Of ``|D| * W``, the numerator's share."""
+    """Of ``|D| * W``, the numerator's share. Of ``D * W`` itself when the
+    expansion keeps the phases."""
     energy: jax.Array
     """Of ``|D|**2 * W``, a denominator's share."""
     weight: jax.Array
@@ -72,20 +73,39 @@ jax.tree_util.register_dataclass(
 
 
 def expand_particle(
-    data: ArrayLike, weight: ArrayLike, basis: Basis
+    data: ArrayLike, weight: ArrayLike, basis: Basis, phases: bool = False
 ) -> Expansion:
     """Expand what the rotational stage of a comparison needs.
+
+    With ``phases`` the numerator is expanded from ``D`` and not from
+    ``|D|``, so the first stage is the real part of the constrained
+    correlation at no shift, at every rotation. That gives up what the
+    amplitudes were chosen for: the rotation is then only found if the
+    two particles are already near enough to centred that their phases
+    agree, about a voxel of the band at its outermost sphere.
+
+    What it buys is the signal. With noise ``n`` on a signal ``s``, a
+    product of two spectra has an expectation that goes as ``s**2``, and
+    a product of two amplitudes one that goes as ``s**4`` over the noise
+    squared, because an amplitude of mostly noise barely moves when the
+    signal under it does. Simulations at a signal to noise ratio of one do
+    not show the difference. Subtomograms do: on EMPIAR-10304 the
+    amplitudes put the right rotation at the sixty-third percentile of
+    their grid, where chance is the fiftieth, and no centring or
+    standardising of them changed that, while the phases put it at the
+    ninety-ninth.
 
     Args:
         data: A centred Fourier volume, ``(size, size, size)``.
         weight: Its non-negative Fourier weight, the same shape.
         basis: What `frmony.harmonics.make_basis` built.
+        phases: Keep the phases of the data in the numerator.
     """
     data = to_device(data)
     weight = jnp.maximum(to_device(weight), 0.0)
     amplitude = jnp.abs(data)
     return Expansion(
-        amplitude=expand(amplitude * weight, basis),
+        amplitude=expand((data if phases else amplitude) * weight, basis),
         energy=expand(amplitude * amplitude * weight, basis),
         weight=expand(weight, basis),
     )

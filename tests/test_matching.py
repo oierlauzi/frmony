@@ -292,6 +292,60 @@ def test_a_pair_of_subtomograms_is_aligned(rng: np.random.Generator) -> None:
     assert np.percentile(errors, 80) < 12.0
 
 
+def test_phases_find_what_amplitudes_are_too_noisy_to(
+    rng: np.random.Generator,
+) -> None:
+    """Under noise, the first stage has to keep the phases.
+
+    A product of two spectra has an expectation that goes as the signal
+    squared. A product of two amplitudes of mostly noise goes as its
+    fourth power, so it falls away far sooner. This is the simulation of
+    what the first real dataset showed, where the amplitudes aligned
+    three pairs in a thousand and the phases three in ten.
+
+    Measured here, with noise at twice the signal, on two seeds: the
+    amplitudes had a median error of 118 and 136 degrees, which is what
+    rotations drawn at random give, and the phases 13 and 21.
+    """
+    count = 6
+    simulation = simulate(rng, count, size=SIZE, tilt=60.0, noise=2.0)
+    basis = _basis()
+    settings = Settings(bandwidth=BANDWIDTH, candidates=10, max_shift=3.0)
+
+    medians = {}
+    for phases in (False, True):
+        expansions = [
+            expand_particle(
+                simulation.data[i], simulation.weight[i], basis, phases
+            )
+            for i in range(count)
+        ]
+        errors = []
+        for first in range(count):
+            for second in range(first + 1, count):
+                found = align_pair(
+                    simulation.data[first],
+                    simulation.weight[first],
+                    simulation.data[second],
+                    simulation.weight[second],
+                    expansions[first],
+                    expansions[second],
+                    settings,
+                )
+                truth = (
+                    simulation.rotations[first] @ simulation.rotations[second].T
+                )
+                errors.append(
+                    np.degrees(
+                        relative_angle(truth, np.asarray(found.rotation))
+                    )
+                )
+        medians[phases] = float(np.median(errors))
+
+    assert medians[True] < 30.0
+    assert medians[False] > 60.0
+
+
 def test_the_candidates_contain_the_answer(rng: np.random.Generator) -> None:
     """Keeping several rotations is what makes the engine work.
 

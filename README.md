@@ -38,8 +38,15 @@ RELION three-dimensional pseudo-subtomograms, version 4 or 5. The two write
 the same files, and the version is detected rather than asked for.
 
 ```bash
-frmony run Extract/job006/particles.star run1/ --partners 16 --verbose
+frmony run Extract/job006/particles.star run1/ --partners 150 \
+    --phases --mask-radius 16 --root . --verbose
 ```
+
+`--phases` and `--mask-radius` are what real subtomograms have needed. The
+first keeps the phases in the rotational search. The second is the radius
+of a soft mask in voxels of the box, a little wider than the particle.
+`--root` is the RELION project, which is what the paths in the table are
+relative to.
 
 Plain volumes, with the missing wedge given on the command line:
 
@@ -129,21 +136,43 @@ what to use.
 
 Worth reading before trusting the output.
 
-**The STAR output has not been checked against RELION.** `frmony` writes
-its orientations as ZYZ Euler angles and its centres in angstroms. That is
-the natural reading of those columns. Whether RELION takes an orientation
-to mean that one or its inverse, and whether it adds or subtracts the
-origin, has not been tested against RELION itself. Either would be silent
-if wrong, and would give a wrong map rather than an error. Check the output
-against a refinement of the same particles before relying on it.
+**The origins in the STAR output have not been checked against RELION.**
+The angles have: on EMPIAR-10304 they agree with those of a RELION
+refinement up to one rotation of the whole set, and not with their
+inverses. Whether RELION adds or subtracts the origin has not been tested.
+It would be silent if wrong. The particles of that test were centred
+already, so their origins were too small to tell.
 
-**Accuracy has only been measured on simulated data.** Take a sixty degree
-tilt range and no noise. The median error of a pair is then about five
-degrees, and synchronization brings it down to three. With noise as large
-as the signal, the synchronized median is five degrees. At twice the signal
-it is fourteen. At three times it breaks down, at forty-three. Real
-subtomograms are often noisier than that. `frmony` has not been run on real
-data at all.
+**On simulated data.** Take a sixty degree tilt range and no noise. The
+median error of a pair is then about five degrees, and synchronization
+brings it down to three. With noise as large as the signal, the
+synchronized median is five degrees. At twice the signal it is fourteen. At
+three times it breaks down, at forty-three.
+
+**On real data, one dataset.** EMPIAR-10304, 10357 ribosomes as RELION 5
+pseudo-subtomograms of 48 voxels at 12.6 A, compared with the orientations
+of a RELION refinement of the same particles. With `--phases` and
+`--mask-radius 16`, three pairs in ten came out within fifteen degrees of
+the refinement. With 150 partners the synchronized orientations had a
+median error of 7.0 degrees, 83 in a hundred within fifteen, after seven
+minutes on one GPU. That is one dataset, of a large particle, at one
+binning.
+
+**Without `--phases` it does not work on that data.** The rotational search
+on amplitudes alone aligned three pairs in a thousand, which is what chance
+gives, and the orientations that came out were random. The simulations do
+not show this, because they are not noisy enough. `--phases` is off by
+default only because it gives up something: see the next paragraph.
+
+**`--phases` needs the particles roughly centred.** The amplitudes were
+chosen because they do not move when the particle does. The phases do. The
+particles above had been extracted at refined centres. How far a particle
+can be off before the rotation is lost has not been measured.
+
+**The resolution is not a gold standard.** The two halves are aligned
+together, and they share whatever the tomograms have in common. On the
+data above, particles given no orientation at all still correlated to
+36 A.
 
 **Volumes are read one at a time.** The loader does not yet overlap reads
 with computation.
