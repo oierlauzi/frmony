@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from frmony.geometry import random_rotations, relative_angle
+from frmony.geometry import exponential_map, random_rotations, relative_angle
 from frmony.graph import build_pairs
 from frmony.symmetry import point_group
 from frmony.synchronization.power_method import (
@@ -481,3 +481,113 @@ def test_everything_together(rng: np.random.Generator) -> None:
     np.testing.assert_allclose(
         np.einsum('nji,nj->i', result.orientations, found), 0.0, atol=1e-6
     )
+
+
+# ------------------------------------------------- weighing pairs by residual
+
+
+def _particle_errors(found: np.ndarray, truth: np.ndarray) -> np.ndarray:
+    """Each orientation's error [deg], once the one global rotation that
+    orientations are known up to is taken out."""
+    gram = np.einsum('nji,njk->ik', truth, found)
+    u, _, vt = np.linalg.svd(gram)
+    turn = u @ np.diag([1.0, 1.0, np.linalg.det(u @ vt)]) @ vt
+    return np.degrees(relative_angle(found, truth @ turn))
+
+
+def test_a_mixture_of_residuals_is_taken_apart(
+    rng: np.random.Generator,
+) -> None:
+    """Right pairs off by a few degrees, wrong ones off at random: the fit
+    finds how many of each and how far the right ones are off. Measured:
+    a share of 0.31 for 0.30, and a width of 3.01 degrees for 3."""
+    from frmony.synchronization.rotations import inlier_probabilities
+
+    count = 4000
+    right = rng.random(count) < 0.3
+    width = np.radians(3.0)
+    small = np.linalg.norm(rng.normal(size=(count, 3)) * width, axis=1)
+    noise = random_rotations(rng, count)
+    large = np.arccos(
+        np.clip((np.trace(noise, axis1=1, axis2=2) - 1) / 2, -1, 1)
+    )
+    residuals = np.where(right, small, large)
+
+    posterior, fitted, share = inlier_probabilities(residuals)
+    assert share == pytest.approx(0.3, abs=0.03)
+    assert np.degrees(fitted) == pytest.approx(3.0, abs=0.3)
+    assert posterior[right].mean() > 0.95
+    assert posterior[~right].mean() < 0.05
+
+
+def test_a_perfect_measurement_is_right() -> None:
+    # Both densities vanish as r**2 at nought. Compared as they are, a
+    # residual of exactly nought is nought over nought.
+    from frmony.synchronization.rotations import inlier_probabilities
+
+    residuals = np.concatenate((np.zeros(50), np.linspace(1.0, 3.0, 50)))
+    posterior, _, _ = inlier_probabilities(residuals)
+    assert np.all(posterior[:50] > 0.99)
+    assert np.all(np.isfinite(posterior))
+
+
+def test_a_group_brings_wrong_pairs_closer() -> None:
+    # Modulo C4 a random rotation is never more than its nearest element
+    # away, so a wrong pair looks less wrong, and the density says so.
+    # Measured: a mean of 2.21 radians with no group and 1.64 with C4.
+    from frmony.synchronization.rotations import outlier_density
+
+    angles = np.linspace(0.0, np.pi, 2001)
+    plain = outlier_density(angles)
+    four = outlier_density(angles, point_group('C4'))
+    for density in (plain, four):
+        assert np.trapezoid(density, angles) == pytest.approx(1.0, abs=0.01)
+    mean = lambda d: np.trapezoid(angles * d, angles)  # noqa: E731
+    assert mean(four) < mean(plain) - 0.3
+
+
+def test_weighing_beats_a_threshold_when_most_pairs_are_wrong(
+    rng: np.random.Generator,
+) -> None:
+    """Seven pairs in ten wrong, the rest off by five degrees.
+
+    Measured: a median error of 6.1 degrees, and 11.3 at the ninetieth
+    percentile, dropping what is off by more than ninety degrees; 0.85
+    and 1.4 weighing every pair by its residual, which put the right
+    pairs at 0.999 and the wrong ones at 0.001.
+    """
+    count = 300
+    truth = random_rotations(rng, count)
+    left, right = build_pairs(count, 120, rng)
+    relative = truth[left] @ np.swapaxes(truth[right], -2, -1)
+    good = rng.random(len(left)) < 0.3
+    noise = exponential_map(
+        rng.normal(size=(len(left), 3)) * np.radians(5.0) / np.sqrt(3.0)
+    )
+    measured = np.where(
+        good[:, None, None], relative @ noise, random_rotations(rng, len(left))
+    )
+
+    threshold = synchronize_rotations(
+        count,
+        left,
+        right,
+        measured,
+        np.ones(len(left)),
+        robust=False,
+        reject_above=np.radians(90.0),
+        rounds=6,
+    )
+    weighed = synchronize_rotations(
+        count, left, right, measured, np.ones(len(left))
+    )
+    errors = {
+        name: _particle_errors(result.orientations, truth)
+        for name, result in (('threshold', threshold), ('weighed', weighed))
+    }
+    assert np.median(errors['weighed']) < 2.0
+    assert np.percentile(errors['weighed'], 90) < 3.0
+    assert np.median(errors['threshold']) > 3.0 * np.median(errors['weighed'])
+    assert weighed.inliers is not None
+    assert weighed.inliers[good].mean() > 0.9
+    assert weighed.inliers[~good].mean() < 0.1

@@ -13,14 +13,29 @@ member nearest the current estimate, synchronize, repeat. With a trivial
 group the snap does nothing, so there is one path and not two.
 
 And some pairs are simply wrong -- two particles that were never the same
-thing, or a correlation that peaked in the wrong place. They are dropped by
-their residual, measured modulo the group, which matters: with C4 symmetry
-a residual of ninety degrees is a perfect measurement, and a rule that did
-not know about the symmetry would discard exactly the pairs that are right.
+thing, or a correlation that peaked in the wrong place. On real
+subtomograms most are: of the pairs of EMPIAR-10304, between four and
+eight in ten. Each pair is weighed by the probability that it is right,
+read off its residual, measured modulo the group, which matters: with C4
+symmetry a residual of ninety degrees is a perfect measurement, and a rule
+that did not know about the symmetry would discard exactly the pairs that
+are right.
+
+That probability comes from a mixture fitted to the residuals themselves
+(`inlier_probabilities`). A right pair is off by a small error of some
+width; a wrong one is off by as much as a rotation drawn at random would
+be, which the group decides and nothing else does. The width and the share
+of right pairs are fitted, so there is no threshold to choose. Dropping
+pairs above a residual of ninety degrees, which is what this used to do,
+kept two thirds of the pairs of EMPIAR-10304 and only six in ten of those
+were right; 88 particles in a hundred came out within fifteen degrees of a
+refinement. Weighed by the mixture, 97 did, where knowing which pairs were
+right would give 99.7.
 """
 
 from __future__ import annotations
 
+import functools
 import logging
 from dataclasses import dataclass
 
@@ -36,7 +51,13 @@ from ..symmetry import (
 )
 from .power_method import synchronize
 
-__all__ = ['Synchronized', 'propagate_along_tree', 'synchronize_rotations']
+__all__ = [
+    'Synchronized',
+    'inlier_probabilities',
+    'outlier_density',
+    'propagate_along_tree',
+    'synchronize_rotations',
+]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,9 +71,12 @@ class Synchronized:
     residuals: NDArray[np.float64]
     """How far each pair ended up from agreeing [rad], modulo symmetry."""
     kept: NDArray[np.bool_]
-    """Which pairs survived the rejection, ``(pairs,)``."""
+    """Which pairs are more likely right than not, ``(pairs,)``."""
     iterations: int
     """Steps the last synchronization took."""
+    inliers: NDArray[np.float64] | None = None
+    """The probability that each pair is right, ``(pairs,)``, if it was
+    fitted."""
 
 
 def propagate_along_tree(
@@ -122,6 +146,138 @@ def propagate_along_tree(
     return orientations
 
 
+_ANGLES = np.linspace(0.0, np.pi, 1025)
+"""Where the densities of a residual are tabulated [rad]."""
+
+
+@functools.lru_cache(maxsize=32)
+def _outlier_table(group_key: bytes, order: int) -> NDArray[np.float64]:
+    if order == 1:
+        density = (1.0 - np.cos(_ANGLES)) / np.pi
+        return density
+    group = np.frombuffer(group_key).reshape(-1, 3, 3)
+    from ..geometry import random_rotations
+
+    rotations = random_rotations(np.random.default_rng(0), 200_000)
+    traces = np.einsum('gij,nij->ng', group, rotations)
+    angles = np.arccos(np.clip((traces.max(axis=1) - 1.0) / 2.0, -1.0, 1.0))
+    counts, edges = np.histogram(angles, bins=256, range=(0.0, np.pi))
+    centres = 0.5 * (edges[1:] + edges[:-1])
+    density = np.interp(
+        _ANGLES, centres, counts / (len(angles) * (edges[1] - edges[0]))
+    )
+    return np.asarray(density / np.trapezoid(density, _ANGLES))
+
+
+def outlier_density(
+    residuals: ArrayLike, group: ArrayLike | None = None
+) -> NDArray[np.float64]:
+    """How likely a residual is for a pair that measured nothing.
+
+    A wrong pair is off by as much as a rotation drawn at random. Measured
+    modulo a group, that is the angle to the nearest of its elements,
+    which is tabulated once per group by drawing rotations. With no group
+    it is ``(1 - cos r) / pi``.
+
+    Args:
+        residuals: Angles [rad].
+        group: The elements of the group, ``(order, 3, 3)``, in any frame:
+            the angle to the nearest of them does not depend on it.
+
+    Returns:
+        The density at each residual, per radian.
+    """
+    elements = np.eye(3)[None] if group is None else np.asarray(group)
+    table = _outlier_table(
+        np.ascontiguousarray(elements, dtype=np.float64).tobytes(),
+        len(elements),
+    )
+    return np.interp(np.asarray(residuals, dtype=np.float64), _ANGLES, table)
+
+
+def _outlier_shape(
+    residuals: NDArray[np.float64], group: ArrayLike | None
+) -> NDArray[np.float64]:
+    """`outlier_density` over ``r**2``, which is finite at nought.
+
+    Both densities vanish as ``r**2`` at a residual of nought, so they are
+    compared with that factor taken out. Comparing them as they are made
+    a perfect measurement, whose residual is exactly nought, into nought
+    over nought, and called it wrong.
+    """
+    elements = np.eye(3)[None] if group is None else np.asarray(group)
+    table = _outlier_table(
+        np.ascontiguousarray(elements, dtype=np.float64).tobytes(),
+        len(elements),
+    )
+    shape = np.empty_like(table)
+    shape[1:] = table[1:] / _ANGLES[1:] ** 2
+    # (1 - cos r) / (pi r**2) tends to 1 / 2 pi; a tabulated density is
+    # carried to nought from its first few points, where it is flat.
+    shape[0] = shape[1:6].mean() if len(elements) > 1 else 1.0 / (2.0 * np.pi)
+    if len(elements) == 1:
+        small = residuals < 1e-4
+        exact = (1.0 - np.cos(residuals)) / (
+            np.pi * np.maximum(residuals, 1e-12) ** 2
+        )
+        return np.where(small, 1.0 / (2.0 * np.pi), exact)
+    return np.interp(residuals, _ANGLES, shape)
+
+
+def inlier_probabilities(
+    residuals: ArrayLike,
+    group: ArrayLike | None = None,
+    iterations: int = 200,
+) -> tuple[NDArray[np.float64], float, float]:
+    """The probability that each pair is right, from its residual alone.
+
+    A right pair is off by a small error. Taking it as isotropic and
+    Gaussian, of a width ``s``, the angle it is off by has the density
+    ``r**2 exp(-r**2 / 2 s**2)``. A wrong pair is off as `outlier_density`
+    says. The width and the share of right pairs are fitted to the
+    residuals by expectation and maximization, so neither is chosen.
+
+    Args:
+        residuals: Angles [rad], modulo the group.
+        group: The group the residuals are measured modulo.
+        iterations: Steps of the fit.
+
+    Returns:
+        The probability for each pair, the width [rad] and the share of
+        right pairs.
+    """
+    r = np.asarray(residuals, dtype=np.float64)
+    wrong = _outlier_shape(r, group)
+    width = max(float(np.median(r)) / 2.0, np.radians(1.0))
+    share = 0.5
+    posterior = np.full(len(r), 0.5)
+    for _ in range(iterations):
+        # The density of a right pair, over r**2, normalized on [0, pi].
+        bell = _ANGLES**2 * np.exp(-(_ANGLES**2) / (2.0 * width * width))
+        right = np.exp(-(r**2) / (2.0 * width * width)) / max(
+            float(np.trapezoid(bell, _ANGLES)), 1e-300
+        )
+        mine = share * right
+        posterior = mine / np.maximum(mine + (1.0 - share) * wrong, 1e-300)
+        updated = float(np.clip(posterior.mean(), 1e-4, 1.0 - 1e-4))
+        # Three degrees of freedom: the mean of r**2 is 3 s**2. The floor
+        # is what single precision resolves of an angle near nought.
+        width = max(
+            float(
+                np.sqrt(
+                    (posterior * r * r).sum()
+                    / (3.0 * max(posterior.sum(), 1e-12))
+                )
+            ),
+            np.radians(0.05),
+        )
+        if abs(updated - share) < 1e-7:
+            share = updated
+            break
+        share = updated
+    return posterior, width, share
+
+
 def synchronize_rotations(
     count: int,
     left: ArrayLike,
@@ -130,8 +286,9 @@ def synchronize_rotations(
     weights: ArrayLike,
     symmetry: str = 'C1',
     rounds: int = 4,
-    reject_above: float | None = np.radians(90.0),
+    reject_above: float | None = None,
     max_iterations: int = 512,
+    robust: bool = True,
 ) -> Synchronized:
     """Find the orientations the measurements agree on.
 
@@ -143,11 +300,15 @@ def synchronize_rotations(
         weights: How much each is trusted, ``(pairs,)``, non-negative.
         symmetry: The point group of the particle, as `point_group` names
             them. ``'C1'`` for none.
-        rounds: How many times to snap, synchronize and reject.
-        reject_above: Drop pairs whose residual exceeds this [rad]. None
-            keeps every pair. The residual is measured modulo the symmetry,
-            so the threshold means what it says whatever the group is.
+        rounds: How many times to snap, synchronize and weigh.
+        reject_above: Also drop pairs whose residual exceeds this [rad].
+            None keeps every pair to be weighed. The residual is measured
+            modulo the symmetry, so the threshold means what it says
+            whatever the group is.
         max_iterations: Steps allowed in each synchronization.
+        robust: Weigh each pair by the probability that it is right; see
+            `inlier_probabilities`. Without it every pair kept counts by
+            its weight alone.
 
     Returns:
         A `Synchronized`.
@@ -168,6 +329,7 @@ def synchronize_rotations(
 
     order = symmetry_order(symmetry)
     kept = np.ones(len(left), dtype=bool)
+    inliers = np.ones(len(left))
     orientations = propagate_along_tree(
         count, left, right, measurements, weights
     )
@@ -194,19 +356,20 @@ def synchronize_rotations(
                 symmetry,
             )
 
+        using = kept & (inliers > 1e-6)
         snapped = snap_to_symmetry(
-            measurements[kept],
-            left[kept],
-            right[kept],
+            measurements[using],
+            left[using],
+            right[using],
             orientations,
             group,
         )
         orientations, iterations = synchronize(
             count,
-            left[kept],
-            right[kept],
+            left[using],
+            right[using],
             snapped,
-            weights[kept],
+            weights[using] * inliers[using],
             start=orientations,
             max_iterations=max_iterations,
         )
@@ -217,37 +380,65 @@ def synchronize_rotations(
         residuals = residual_angles(
             measurements, left, right, orientations, group
         )
-        if reject_above is None:
-            continue
-
-        surviving = kept & (residuals <= reject_above)
-        if not surviving.any():
-            _LOGGER.warning(
-                'Every pair would be rejected at %.0f degrees; keeping them '
-                'all instead.',
-                np.degrees(reject_above),
+        before = kept.copy()
+        if reject_above is not None:
+            surviving = kept & (residuals <= reject_above)
+            if not surviving.any():
+                _LOGGER.warning(
+                    'Every pair would be rejected at %.0f degrees; keeping '
+                    'them all instead.',
+                    np.degrees(reject_above),
+                )
+            else:
+                kept = surviving
+        if robust:
+            previous = inliers
+            inliers, width, share = inlier_probabilities(
+                residuals[kept], group if order > 1 else None
             )
-            break
-        dropped = int(kept.sum() - surviving.sum())
-        kept = surviving
-        _LOGGER.info(
-            'Round %d: %d pairs kept, %d dropped, median residual %.1f '
-            'degrees.',
-            attempt + 1,
-            int(kept.sum()),
-            dropped,
-            float(np.degrees(np.median(residuals[kept]))),
-        )
-        if dropped == 0:
-            break
+            inliers = _scatter(inliers, kept)
+            _LOGGER.info(
+                'Round %d: %.0f%% of the pairs look right, off by %.1f '
+                'degrees; median residual %.1f degrees.',
+                attempt + 1,
+                100.0 * share,
+                float(np.degrees(width) * np.sqrt(3.0)),
+                float(np.degrees(np.median(residuals[kept]))),
+            )
+            if np.max(np.abs(inliers - previous)) < 1e-3 and np.array_equal(
+                kept, before
+            ):
+                break
+        else:
+            dropped = int(before.sum() - kept.sum())
+            _LOGGER.info(
+                'Round %d: %d pairs kept, %d dropped, median residual %.1f '
+                'degrees.',
+                attempt + 1,
+                int(kept.sum()),
+                dropped,
+                float(np.degrees(np.median(residuals[kept]))),
+            )
+            if dropped == 0:
+                break
 
     residuals = residual_angles(measurements, left, right, orientations, group)
     return Synchronized(
         orientations=orientations,
         residuals=residuals,
-        kept=kept,
+        kept=kept & (inliers > 0.5) if robust else kept,
         iterations=iterations,
+        inliers=inliers if robust else None,
     )
+
+
+def _scatter(
+    values: NDArray[np.float64], where: NDArray[np.bool_]
+) -> NDArray[np.float64]:
+    """Values for the pairs where ``where`` holds, and nothing elsewhere."""
+    out = np.zeros(len(where))
+    out[where] = values
+    return out
 
 
 def _frame_group(

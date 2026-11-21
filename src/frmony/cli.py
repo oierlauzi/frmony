@@ -163,9 +163,11 @@ def _add_run(commands: Any, shared: argparse.ArgumentParser) -> None:
     parser.add_argument(
         '--reject-above',
         type=float,
-        default=90.0,
-        help='Drop pairs whose residual exceeds this [deg], measured '
-        'modulo the symmetry (default: %(default)s). Zero keeps them all.',
+        default=0.0,
+        help='Also drop pairs whose residual exceeds this [deg], measured '
+        'modulo the symmetry. Zero, the default, keeps them all: each '
+        'pair is weighed by how likely its residual says it is to be '
+        'right, which needs no threshold.',
     )
     parser.add_argument(
         '--batch',

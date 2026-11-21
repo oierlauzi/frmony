@@ -74,10 +74,12 @@ class Design:
     symmetry: str = 'C1'
     """Point group of the particle."""
     rounds: int = 4
-    """Times to snap, synchronize and reject."""
-    reject_above: float | None = 90.0
-    """Drop pairs whose residual exceeds this [deg], measured modulo the
-    symmetry. None keeps every pair."""
+    """Times to snap, synchronize and weigh the pairs."""
+    reject_above: float | None = None
+    """Also drop pairs whose residual exceeds this [deg], measured modulo
+    the symmetry. None keeps every pair, and each is weighed by how likely
+    it is to be right; see
+    `frmony.synchronization.rotations.inlier_probabilities`."""
     seed: int = 0
     """Which pairs get chosen."""
     batch: int = 8
@@ -442,13 +444,20 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
                     len(weak),
                 )
 
+        # The centres are weighed as the orientations were: by how likely
+        # each pair is to be right, as well as by its score.
+        trusted = (
+            weights
+            if synchronized.inliers is None
+            else weights * synchronized.inliers
+        )
         centres, _ = synchronize_shifts(
             count,
             left[kept],
             right[kept],
             measured_shifts[kept],
             orientations,
-            weights[kept],
+            trusted[kept],
         )
         if number < design.passes - 1:
             # Bring every particle back to where the pairs put it, and go
