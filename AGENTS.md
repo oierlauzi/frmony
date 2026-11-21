@@ -161,6 +161,23 @@ taken as the difference of their coordinates were ten angstroms out,
 which was enough to make every "centred" measurement on the second
 picking wrong. Displace the first picking by known amounts instead.
 
+**The noise spectrum is smoothed, and that is measured, not derived.**
+`particles.noise_spectra` smooths each tomogram's power over 1.5 voxels.
+Unsmoothed it made pairs worse, 35 in a hundred against 37 with none,
+although it predicts a held-out particle's power better than any
+smoothing does, so do not "fix" the smoothing by cross-validating it on
+power. The best width did not follow the mask either: 1.5 at masks of 12
+and of 20. The likely reason, unproven, is that its finest detail is the
+pattern of tilts each particle saw, which the particle's own weight
+already carries.
+
+**Do not weigh pairs by their peak.** The height of a pair's peak over its
+grid predicts whether it is right, with an area under the curve of 0.78,
+and weighing the synchronization by it still made things worse, by up to
+twenty particles in a hundred. A peak says as much about the particle as
+about the pair, so it piles trust onto some particles and starves
+others. The residual is what says whether a pair is right.
+
 **One model for every input.** A spectrum comes with a transfer `W`, and
 is `W S` plus noise of variance `W`. `particles.whiten` divides it by the
 square root, above a floor, which leaves the weight times the structure
@@ -177,6 +194,14 @@ shell, aligned four pairs in a hundred where whitening aligned thirty
 seven. The fit puts all of the variance in the second term, which says the
 plain correlation is already the matched filter, and the plain correlation
 aligned eleven. Nobody knows why yet.
+
+**A hard threshold on residuals keeps mostly wrong pairs.** At ninety
+degrees it kept two thirds of the pairs of EMPIAR-10304 and only six in
+ten of those were right. Weighing by the mixture in
+`synchronization.rotations.inlier_probabilities` kept the ones that
+were, 89 to 97 in a hundred. Its densities both vanish as the square of
+the residual, so they are compared with that factor out: compared as
+they are, a perfect pair is nought over nought.
 
 **Whose weight goes in the denominator matters.** With the same numerator,
 normalizing each particle's energy by its own weight over the region both

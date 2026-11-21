@@ -47,8 +47,18 @@ The first run on real data, EMPIAR-10304.
   printed. They are read in batches through vitrio, the next while the
   last is prepared, in two minutes.
 
+- Pairs were dropped by a hard threshold on their residual, which kept
+  mostly wrong ones. Each is now weighed by the probability that it is
+  right, from a mixture fitted to the residuals. `--reject-above` is off
+  by default.
+
 ### Added
 
+- `particles.noise_spectra`: each tomogram's noise spectrum, measured
+  from its particles and divided out. Particles are grouped by
+  `rlnTomoName`.
+- `synchronization.rotations.inlier_probabilities` and
+  `outlier_density`, which do the weighing above.
 - Progress bars for reading the particles and for aligning the pairs,
   shown with `--verbose`.
 - `Design.phases` and `--phases`, on by default, which keep the phases in

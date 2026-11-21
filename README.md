@@ -42,8 +42,9 @@ frmony run Extract/job006/particles.star run1/ --partners 150 \
     --mask-radius 16 --max-shift 4.5 --passes 3 --root . --verbose
 ```
 
-`--mask-radius` is the radius of a soft mask in voxels of the box, a
-little wider than the particle. Real subtomograms have needed it.
+`--mask-radius` is the radius of a soft mask in voxels of the box. Make it
+about the radius of the particle: for a ribosome at 8.4 A, 20 voxels did
+best, and 24 aligned fewer pairs. Real subtomograms have needed it.
 
 `--max-shift` is how far apart the centres of two particles may be, in
 voxels of the analysis band. Rotations and shifts are searched together
@@ -81,6 +82,15 @@ print(result.resolution, result.orientations.shape)
 
 ## How it works
 
+### The noise
+
+Every input is read as one model: a spectrum is its transfer times the
+structure, plus noise. The noise is whitened by the transfer, and then by
+the noise spectrum each tomogram is measured to have, from its own
+particles, which is far from flat: streaks along the tilt axis, and the
+low frequencies a mask spreads into the band. A wedge and a clean volume
+go through the same steps.
+
 ### Pairwise alignment
 
 A pair has six unknowns, a rotation and a shift, and they are searched
@@ -113,6 +123,14 @@ That is enough for clean volumes and not for subtomograms.
 
 A generalized power method finds the orientations that fit every pair best.
 Least squares then gives the centres.
+
+Most pairs of real subtomograms are wrong, between four and eight in ten,
+so each pair is weighed by the probability that it is right. That is read
+off its residual by a mixture fitted to all of them: a right pair is off
+by a small error, of a width that is fitted, and a wrong one by as much as
+a random rotation would be. There is no threshold. Pairs with a junk pick
+in them, which no correlation can make right, end up with almost no
+weight, without anything having said which picks are junk.
 
 With `--passes`, the particles are brought back to those centres and
 aligned again. A pair of centred particles is easier to align than a
@@ -186,7 +204,20 @@ centres came back to 5 A in the plane and 13 A along the beam. The
 quarter picked furthest off, beyond 20 A in the plane, did worst, at 38
 in a hundred.
 
-That is one dataset, of a large particle, at one binning.
+Those runs predate the two changes below, and have not been repeated
+whole. What the changes do was measured on pairs aligned once and
+synchronized both ways, on 600 particles of each picking:
+
+| | before | after |
+|---|---|---|
+| first picking, centred | 88 in a hundred within 15 degrees, median 5.9 | 95, median 1.9 |
+| second picking at bin 4, junk included | 50, median 14.7 | 88, median 2.7 |
+
+The before of the second picking is what a whole run of it gave, 50 in
+a hundred. The after used a mask of 20 voxels at 8.4 A, 168 A, rather
+than 202 A, which the noise spectrum makes the better choice.
+
+That is one dataset, of a large particle, at two binnings.
 
 **With `--no-phases` it does not work on that data.** The rotational
 search on amplitudes aligned three pairs in a thousand, which is what
