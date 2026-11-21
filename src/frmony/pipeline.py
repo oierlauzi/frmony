@@ -105,6 +105,9 @@ class Design:
     is not, so the later passes align more of them: on EMPIAR-10304,
     with particles thirty angstroms off, 59 in a hundred came out within
     fifteen degrees after one pass and 73 after three."""
+    noise_spectrum: bool = True
+    """Divide each particle by the noise spectrum of its acquisition; see
+    `frmony.particles.noise_spectra`. Off only to measure what it does."""
     phases: bool = True
     """Keep the phases in the first, rotational stage. They find rotations
     that the amplitudes are too noisy to: on EMPIAR-10304 the amplitudes
@@ -266,7 +269,10 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
         # coefficients back, and then sent those over again to align with.
         started = time.perf_counter()
         data, weight = recentred(
-            subtomograms, applied if number else None, design.batch
+            subtomograms,
+            applied if number else None,
+            design.batch,
+            noise=design.noise_spectrum,
         )
         # Two particles are compared over the frequencies both measured, and
         # not in proportion to how well. A weight that follows the transfer

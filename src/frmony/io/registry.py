@@ -43,6 +43,10 @@ class Source:
     """Whatever the reader wants to carry through to the writer."""
     format: str = ''
     """Which reader produced this."""
+    groups: list[str] | None = None
+    """Which acquisition each particle came from, if the format says: a
+    tomogram, for RELION. Particles of one acquisition share a noise
+    spectrum, which is estimated from them together."""
 
 
 Reader = Callable[[Path, Path | None], Source]
@@ -77,6 +81,11 @@ def _read_relion(path: Path, root: Path | None) -> Source:
         pixel_size=metadata.pixel_size,
         metadata=metadata,
         format=metadata.version,
+        groups=(
+            [str(name) for name in metadata.particles['rlnTomoName']]
+            if 'rlnTomoName' in metadata.particles.columns
+            else None
+        ),
     )
 
 

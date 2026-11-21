@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import functools
 import logging
+from collections.abc import Hashable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -29,9 +30,23 @@ from ._transfers import to_device, to_host
 from .io.volumes import prepare, soft_ball
 from .io.wedge import cone_weight, relion_weight, wedge_weight
 
-__all__ = ['Subtomograms', 'load_subtomograms', 'recentred', 'whiten']
+__all__ = [
+    'Subtomograms',
+    'load_subtomograms',
+    'noise_spectra',
+    'recentred',
+    'whiten',
+]
 
 _LOGGER = logging.getLogger(__name__)
+
+_NOISE_SMOOTHING = 1.5
+"""Width of the smoothing of a noise spectrum, in Fourier voxels. Measured;
+see `noise_spectra`."""
+
+_NOISE_FLOOR = 1e-3
+"""Below this fraction of an acquisition's largest noise power a voxel is
+dropped rather than divided by."""
 
 _WINDOW = 128
 """Particles read in one batch, while the batch before is prepared. Two
@@ -59,6 +74,10 @@ class Subtomograms:
     """Of the original box [A]."""
     box: int
     """Extent of the original box, before cropping."""
+    groups: NDArray[np.int64] | None = None
+    """Which acquisition each particle came from, ``(particles,)``. The
+    particles of one share a noise spectrum; see `recentred`. None puts
+    them all in one."""
     mask_radius: float | None = None
     """Radius of a soft real-space mask, in voxels of the original box.
     Kept and not applied: a mask belongs on the particle, and where the
@@ -180,6 +199,7 @@ def load_subtomograms(
     weight_transform: str = 'identity',
     mask_radius: float | None = None,
     batch: int = 32,
+    groups: Sequence[Hashable] | None = None,
 ) -> Subtomograms:
     """Read subtomograms and put them into the form the matching takes.
 
@@ -201,8 +221,11 @@ def load_subtomograms(
             carried with the particles and applied by `recentred`, once
             for each centre they are believed to have. None leaves the
             volumes alone.
-        batch: Kept for the callers that pass it. The volumes are read
-            one at a time.
+        batch: Kept for the callers that pass it.
+        groups: Which acquisition each particle came from, one label per
+            particle, such as the name of its tomogram. Particles with
+            the same label share a noise spectrum. None puts them all in
+            one.
 
     Returns:
         The loaded `Subtomograms`.
@@ -335,11 +358,20 @@ def load_subtomograms(
             bar.update(1)
     bar.close()
 
+    labels = None
+    if groups is not None:
+        if len(groups) != len(data_paths):
+            raise ValueError('There must be one group for each particle.')
+        _, inverse = np.unique(
+            np.asarray([str(g) for g in groups]), return_inverse=True
+        )
+        labels = inverse.astype(np.int64)
     return Subtomograms(
         data=spectra,
         weight=weights,
         pixel_size=pixel_size,
         box=box,
+        groups=labels,
         mask_radius=mask_radius,
     )
 
@@ -390,14 +422,15 @@ def recentred(
     subtomograms: Subtomograms,
     centres: NDArray[np.float64] | None = None,
     batch: int = 32,
+    noise: bool = True,
 ) -> tuple[jax.Array, jax.Array]:
     """The particles brought back to their centres and masked there.
 
     Each spectrum is taken back to what was stored, moved, masked in real
     space and whitened again, in that order: a mask multiplies a volume
     and so mixes the frequencies of its spectrum, which the whitening
-    then has to see. With no centres and no mask nothing is done to
-    them, and they cross to the device as they are.
+    then has to see. The noise spectrum of each acquisition is then
+    measured from what came out, and divided out.
 
     Args:
         subtomograms: What `load_subtomograms` built.
@@ -405,12 +438,17 @@ def recentred(
             3)`` in voxels of the band and ordered ``(x, y, z)``. Nothing
             if not given.
         batch: How many particles to work on at once.
+        noise: Divide by the noise spectrum of each acquisition after;
+            see `noise_spectra`.
 
     Returns:
         The spectra and their weights, on the device.
     """
     if subtomograms.mask_radius is None and centres is None:
-        return to_device(subtomograms.data), to_device(subtomograms.weight)
+        if not noise:
+            return to_device(subtomograms.data), to_device(subtomograms.weight)
+        moved = np.array(subtomograms.data)
+        return _with_noise_spectrum(subtomograms, moved)
 
     size = subtomograms.band
     moves = np.asarray(
@@ -444,4 +482,112 @@ def recentred(
                 max(batch, 1),
             )
         )
-    return to_device(moved), to_device(subtomograms.weight)
+    if not noise:
+        return to_device(moved), to_device(subtomograms.weight)
+    return _with_noise_spectrum(subtomograms, moved)
+
+
+def noise_spectra(
+    spectra: NDArray[np.complex64],
+    weight: NDArray[np.float32],
+    groups: NDArray[np.int64] | None,
+) -> NDArray[np.float32]:
+    """The noise power of each acquisition, per Fourier voxel.
+
+    Whitening by a particle's own transfer leaves noise that is white only
+    if the transfer were all there is to it. It is not. Within a shell of
+    EMPIAR-10304, after that whitening, some voxels held forty to a
+    hundred and forty times the median power, and the tenth of voxels
+    with the most held four to six times what the tenth with the least
+    did: streaks along the tilt axis, and the strong low frequencies a
+    mask spreads into the band around them. That is shared by the
+    particles of a tomogram, in the frame of the tomogram, and so it is
+    measured from them: the mean power at each voxel over the particles
+    that measured it.
+
+    It is smoothed over 1.5 voxels before use. Divided out as it stands
+    it made matters worse, although it predicts a held-out particle's
+    power better than any smoothing does: its finest detail is the
+    pattern of tilts each particle saw, which the particle's own weight
+    already carries and which differs a little from one particle to the
+    next. Measured on centred pairs whose answer a refinement gives, the
+    share aligned to within fifteen degrees: 37 in a hundred with no
+    spectrum, 35 with it unsmoothed, 45 smoothed over one voxel, 48 over
+    two, 46 over three, and 1.5 was best at masks of 12 and of 20. An
+    estimate from thirty particles of a tomogram did as well as one from
+    eight hundred.
+
+    What is measured includes the signal. Where noise dominates, which is
+    everywhere in a subtomogram, that changes nothing. For clean volumes
+    it flattens the structure's own spectrum, which a correlation does
+    not mind.
+
+    Args:
+        spectra: Whitened, masked spectra ``(particles, n, n, n)``.
+        weight: Their weights, the same shape.
+        groups: Which acquisition each particle came from. None is one.
+
+    Returns:
+        ``(acquisitions, n, n, n)``, the smoothed mean power, and zero
+        where nothing was measured.
+    """
+    from scipy.ndimage import gaussian_filter
+
+    labels = (
+        np.zeros(len(spectra), dtype=np.int64) if groups is None else groups
+    )
+    count = int(labels.max()) + 1
+    shape = spectra.shape[1:]
+    power = np.zeros((count, *shape))
+    seen = np.zeros((count, *shape))
+    for start in range(0, len(spectra), 256):
+        stop = min(start + 256, len(spectra))
+        measured = weight[start:stop] > 0.0
+        values = np.abs(spectra[start:stop]) ** 2 * measured
+        np.add.at(power, labels[start:stop], values)
+        np.add.at(seen, labels[start:stop], measured)
+    out = np.zeros((count, *shape), dtype=np.float32)
+    for group in range(count):
+        smoothed = gaussian_filter(power[group], _NOISE_SMOOTHING)
+        support = gaussian_filter(seen[group], _NOISE_SMOOTHING)
+        # Where fewer than one particle's worth measured anything near,
+        # there is nothing to estimate from.
+        mean = np.where(
+            support >= 1.0, smoothed / np.maximum(support, 1.0), 0.0
+        )
+        out[group] = mean.astype(np.float32)
+    return out
+
+
+def _with_noise_spectrum(
+    subtomograms: Subtomograms, moved: NDArray[np.complex64]
+) -> tuple[jax.Array, jax.Array]:
+    """Divide the spectra and their weights by the noise of their group.
+
+    A spectrum is then its weight times the structure, plus noise of unit
+    variance, as before, and the average weights each particle by what
+    it measured over how noisy it was.
+
+    The division is by a power averaged over many particles and smoothed,
+    never by one particle's own value, and nothing below a thousandth of
+    a group's largest power is divided by: those voxels are dropped.
+    """
+    spectra = noise_spectra(moved, subtomograms.weight, subtomograms.groups)
+    labels = (
+        np.zeros(len(moved), dtype=np.int64)
+        if subtomograms.groups is None
+        else subtomograms.groups
+    )
+    scales = np.zeros_like(spectra)
+    for group, power in enumerate(spectra):
+        usable = power > _NOISE_FLOOR * float(power.max(initial=0.0))
+        scales[group] = np.where(
+            usable, 1.0 / np.sqrt(np.where(usable, power, 1.0)), 0.0
+        )
+    weight = np.empty_like(subtomograms.weight)
+    for start in range(0, len(moved), 256):
+        stop = min(start + 256, len(moved))
+        scale = scales[labels[start:stop]]
+        moved[start:stop] *= scale
+        weight[start:stop] = subtomograms.weight[start:stop] * scale
+    return to_device(moved), to_device(weight)

@@ -267,6 +267,7 @@ def _run_pipeline(
             cone=cone,
             weight_transform=weight_transform,
             mask_radius=mask_radius,
+            groups=source.groups,
         )
         design = Design(
             partners=partners,
