@@ -203,6 +203,21 @@ were, 89 to 97 in a hundred. Its densities both vanish as the square of
 the residual, so they are compared with that factor out: compared as
 they are, a perfect pair is nought over nought.
 
+**A pair's score cannot stand in for its residual.** Even the best map
+from score to weight, learned from the residual weights themselves,
+correlated with them at 0.20 to 0.49, and synchronizing with it alone
+put 34 to 88 particles in a hundred within fifteen degrees where the
+residual weights put 84 to 97. A score tells right pairs from wrong
+with an area under the curve of 0.69 to 0.77; the residual, 0.97 to
+0.99. What a pair agrees with says more than how well it correlates.
+
+**Neither the score nor the peak adds to the residual.** Letting the
+mixture learn how much a pair's score is worth, as a logistic prior
+fitted with it, changed no result by more than three particles in a
+thousand, on five sets of pairs: the residual already puts right pairs
+at 0.94 to 0.99 and wrong ones at 0.03 to 0.10. What did matter was
+running enough rounds for the weights to settle; see `Design.rounds`.
+
 **Whose weight goes in the denominator matters.** With the same numerator,
 normalizing each particle's energy by its own weight over the region both
 measured aligned 37 pairs in a hundred. Letting the partner's weight into

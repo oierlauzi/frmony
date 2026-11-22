@@ -157,8 +157,9 @@ def _add_run(commands: Any, shared: argparse.ArgumentParser) -> None:
     parser.add_argument(
         '--rounds',
         type=_count,
-        default=4,
-        help='Times to snap, synchronize and reject (default: %(default)s).',
+        default=8,
+        help='Times to snap, synchronize and weigh the pairs (default: '
+        '%(default)s).',
     )
     parser.add_argument(
         '--reject-above',

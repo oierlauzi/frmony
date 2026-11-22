@@ -73,8 +73,15 @@ class Design:
     orientation; see `frmony.harmonics.band_radii`."""
     symmetry: str = 'C1'
     """Point group of the particle."""
-    rounds: int = 4
-    """Times to snap, synchronize and weigh the pairs."""
+    rounds: int = 8
+    """Times to snap, synchronize and weigh the pairs.
+
+    Where most pairs are wrong, the weights take a while to settle. On
+    the second picking of EMPIAR-10304 at bin 4, four rounds put 83
+    particles in a hundred within fifteen degrees, eight put 87, and
+    sixteen and thirty-two no more. On the first picking four were
+    already enough. A round of a hundred thousand pairs is under a
+    second."""
     reject_above: float | None = None
     """Also drop pairs whose residual exceeds this [deg], measured modulo
     the symmetry. None keeps every pair, and each is weighed by how likely
