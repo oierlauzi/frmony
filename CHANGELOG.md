@@ -55,8 +55,8 @@ The first run on real data, EMPIAR-10304.
 ### Added
 
 - `particles.noise_spectra`: each tomogram's noise spectrum, measured
-  from its particles and divided out. Particles are grouped by
-  `rlnTomoName`.
+  from its particles. Particles are grouped by `rlnTomoName`. Off by
+  default: it harmed whole runs.
 - `synchronization.rotations.inlier_probabilities` and
   `outlier_density`, which do the weighing above.
 - Progress bars for reading the particles and for aligning the pairs,

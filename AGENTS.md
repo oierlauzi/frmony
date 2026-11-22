@@ -161,6 +161,12 @@ taken as the difference of their coordinates were ten angstroms out,
 which was enough to make every "centred" measurement on the second
 picking wrong. Displace the first picking by known amounts instead.
 
+**Measure a change in a whole run, with the shifts unknown.** The noise
+spectrum raised the pairs aligned on their true centres by ten in a
+hundred and, in a whole run, lowered the particles aligned from 84 in a
+hundred to 54. A pair on its true centre hides what a change does to the
+search over shifts.
+
 **The noise spectrum is smoothed, and that is measured, not derived.**
 `particles.noise_spectra` smooths each tomogram's power over 1.5 voxels.
 Unsmoothed it made pairs worse, 35 in a hundred against 37 with none,

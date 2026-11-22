@@ -42,9 +42,8 @@ frmony run Extract/job006/particles.star run1/ --partners 150 \
     --mask-radius 16 --max-shift 4.5 --passes 3 --root . --verbose
 ```
 
-`--mask-radius` is the radius of a soft mask in voxels of the box. Make it
-about the radius of the particle: for a ribosome at 8.4 A, 20 voxels did
-best, and 24 aligned fewer pairs. Real subtomograms have needed it.
+`--mask-radius` is the radius of a soft mask in voxels of the box: about
+the radius of the particle. Real subtomograms have needed it.
 
 `--max-shift` is how far apart the centres of two particles may be, in
 voxels of the analysis band. Rotations and shifts are searched together
@@ -85,11 +84,14 @@ print(result.resolution, result.orientations.shape)
 ### The noise
 
 Every input is read as one model: a spectrum is its transfer times the
-structure, plus noise. The noise is whitened by the transfer, and then by
-the noise spectrum each tomogram is measured to have, from its own
-particles, which is far from flat: streaks along the tilt axis, and the
-low frequencies a mask spreads into the band. A wedge and a clean volume
-go through the same steps.
+structure, plus noise, and the noise is whitened by the transfer. A wedge
+and a clean volume go through the same steps.
+
+What is left is not flat: streaks along the tilt axis, and the low
+frequencies a mask spreads into the band. Dividing out each tomogram's
+measured spectrum helped pairs put on their true centres and harmed whole
+runs, where the shifts are not yet known, so it is off;
+`Design.noise_spectrum` says why.
 
 ### Pairwise alignment
 
@@ -204,18 +206,13 @@ centres came back to 5 A in the plane and 13 A along the beam. The
 quarter picked furthest off, beyond 20 A in the plane, did worst, at 38
 in a hundred.
 
-Those runs predate the two changes below, and have not been repeated
-whole. What the changes do was measured on pairs aligned once and
-synchronized both ways, on 600 particles of each picking:
+Those runs predate the weighing of pairs in the synchronization. Whole
+runs with it, three passes and 100 partners, on subsets:
 
 | | before | after |
 |---|---|---|
-| first picking, centred | 88 in a hundred within 15 degrees, median 5.9 | 95, median 1.9 |
-| second picking at bin 4, junk included | 50, median 14.7 | 88, median 2.7 |
-
-The before of the second picking is what a whole run of it gave, 50 in
-a hundred. The after used a mask of 20 voxels at 8.4 A, 168 A, rather
-than 202 A, which the noise spectrum makes the better choice.
+| first picking, 600 particles displaced by 30 A | 73 in a hundred within 15 degrees | 88, median 3.5 |
+| second picking at bin 4, 1000 particles, junk included | 50, from the run of the whole set | 69, median 5.6 |
 
 That is one dataset, of a large particle, at two binnings.
 

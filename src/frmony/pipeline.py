@@ -112,9 +112,19 @@ class Design:
     is not, so the later passes align more of them: on EMPIAR-10304,
     with particles thirty angstroms off, 59 in a hundred came out within
     fifteen degrees after one pass and 73 after three."""
-    noise_spectrum: bool = True
+    noise_spectrum: bool = False
     """Divide each particle by the noise spectrum of its acquisition; see
-    `frmony.particles.noise_spectra`. Off only to measure what it does."""
+    `frmony.particles.noise_spectra`.
+
+    Off. Measured on pairs put on their true centres it helped, and in a
+    whole run, where the shifts are searched, it did harm on both
+    datasets it was tried on: on the first picking of EMPIAR-10304,
+    displaced by thirty angstroms, 84 particles in a hundred within
+    fifteen degrees after one pass without it and 54 with it, and on
+    the second picking at bin 4 a set that aligned without it did not
+    align at all with it. The spectrum it divides by is the total power,
+    signal included, so it takes most off the strong low frequencies,
+    which are the ones a shift that is not yet known spoils least."""
     phases: bool = True
     """Keep the phases in the first, rotational stage. They find rotations
     that the amplitudes are too noisy to: on EMPIAR-10304 the amplitudes
