@@ -61,9 +61,13 @@ Plain volumes, with the missing wedge given on the command line:
 frmony run subtomograms.txt run1/ --tilt 60 --pixel-size 4.2
 ```
 
-Four files are written. `average.mrc` is the average. `support.mrc` says
-how much weight stands behind each frequency of it. `resolution.txt` holds
-the half-set shell correlation. `synchronized.star` holds the orientations
+Four files are written. `average.mrc` is the average, at the box and pixel
+size the particles were extracted at, whatever band the alignment used.
+`support.mrc` says how much weight stands behind each frequency of it.
+`resolution.txt` holds the half-set shell correlation. The alignment
+never saw the frequencies beyond its band, so from there on the halves
+could not have been made to agree by being aligned together, and the
+curve is fair. `synchronized.star` holds the orientations
 and centres, beside every column that came in.
 
 The Python API exposes each stage on its own:

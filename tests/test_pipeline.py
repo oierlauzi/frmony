@@ -576,3 +576,108 @@ def test_a_particle_that_is_not_one_has_little_confidence(
     assert np.all((result.confidence >= 0.0) & (result.confidence <= 1.0))
     assert result.confidence[count:].max() < result.confidence[:count].min()
     assert np.isfinite(result.band_limit)
+
+
+# --------------------------------------------- the average at full size
+
+
+def _uneven_project(
+    directory: Path, rng: np.random.Generator, count: int, size: int = 24
+) -> tuple[Path, np.ndarray]:
+    """A RELION job whose weights differ from particle to particle and
+    are not ones and zeros, so that their unpacking and the whitening are
+    tested and not just the wedge."""
+    import pandas as pd
+    import starfile
+
+    from frmony.io.maps import write_map
+
+    simulation = simulate(rng, count, size=size, tilt=60.0)
+    wedge = np.fft.ifftshift(wedge_mask(size, 60.0))[:, :, : size // 2 + 1]
+    names, weights = [], []
+    for index in range(count):
+        volume = np.fft.fftshift(
+            np.fft.ifftn(np.fft.ifftshift(simulation.data[index]))
+        ).real
+        transfer = wedge * rng.uniform(0.2, 3.0, size=wedge.shape)
+        stored = np.concatenate((transfer, np.ones_like(transfer)), axis=0)
+        write_map(directory / f'p{index:03d}_data.mrc', volume, 4.0)
+        write_map(directory / f'p{index:03d}_weights.mrc', stored, 4.0)
+        names.append(f'p{index:03d}_data.mrc')
+        weights.append(f'p{index:03d}_weights.mrc')
+    table = pd.DataFrame(
+        {'rlnImageName': names, 'rlnCtfImage': weights, 'rlnOpticsGroup': 1}
+    )
+    optics = pd.DataFrame({'rlnOpticsGroup': [1], 'rlnImagePixelSize': [4.0]})
+    path = directory / 'particles.star'
+    starfile.write({'optics': optics, 'particles': table}, path, overwrite=True)
+    return path, simulation.rotations
+
+
+@pytest.mark.parametrize('transform', ['identity', 'sqrt'])
+def test_the_streamed_average_is_the_average(
+    tmp_path: Path, rng: np.random.Generator, transform: str
+) -> None:
+    """Read in chunks and prepared on the device, the particles average
+    to what loading them whole and averaging them gives.
+
+    Twelve particles in chunks of five, so that the last chunk is padded
+    and the sums are carried across chunks.
+    """
+    from frmony.averaging import average
+    from frmony.io.registry import read_source
+    from frmony.reconstruction import reconstruct
+
+    count = 12
+    path, rotations = _uneven_project(tmp_path, rng, count)
+    source = read_source(path)
+    assert source.weights is not None
+    shifts = rng.uniform(-2.0, 2.0, size=(count, 3))
+
+    streamed = reconstruct(
+        source.data,
+        rotations,
+        shifts,
+        4.0,
+        weight_paths=source.weights,
+        weight_transform=transform,
+        chunk=5,
+    )
+    loaded = load_subtomograms(
+        source.data,
+        weight_paths=source.weights,
+        pixel_size=4.0,
+        band=0.5,
+        weight_transform=transform,
+    )
+    data, weight = recentred(loaded, noise=False)
+    whole, support = average(data, weight, rotations, shifts)
+
+    whole = np.asarray(whole)
+    assert streamed.structure.shape == whole.shape == (24, 24, 24)
+    np.testing.assert_allclose(
+        streamed.structure, whole, atol=1e-4 * np.abs(whole).max()
+    )
+    np.testing.assert_allclose(
+        streamed.support, np.asarray(support), rtol=1e-4, atol=1e-6
+    )
+    assert streamed.pixel_size == 4.0
+    assert len(streamed.correlation) == 12
+
+
+def test_the_command_line_writes_the_average_at_full_size(
+    tmp_path: Path, rng: np.random.Generator
+) -> None:
+    import mrcfile
+
+    from frmony.cli import main
+
+    path, _ = _relion_project(tmp_path, rng, 12)
+    output = tmp_path / 'run'
+    arguments = ['run', str(path), str(output), '--partners', '6']
+    arguments += ['--bandwidth', '12', '--candidates', '6', '--batch', '2']
+    arguments += ['--max-shift', '2', '--band', '0.3']
+    assert main(arguments) == 0
+    with mrcfile.open(output / 'average.mrc') as written:
+        assert written.data.shape == (24, 24, 24)
+        assert float(written.voxel_size.x) == pytest.approx(4.0)

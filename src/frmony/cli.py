@@ -288,24 +288,9 @@ def _run_pipeline(
 
     directory = Path(output)
     directory.mkdir(parents=True, exist_ok=True)
-    coarse = size * subtomograms.scale
-    write_spectrum(directory / 'average.mrc', result.structure, coarse)
-    write_map(
-        directory / 'support.mrc',
-        np.fft.fftshift(result.support),
-        coarse,
-    )
-    if np.isfinite(result.resolution):
-        verdict = f'resolution {result.resolution:.2f} A'
-    else:
-        edge = f'{result.band_limit:.2f} A'
-        verdict = f'the halves agree to the edge of the band, {edge}'
-    np.savetxt(
-        directory / 'resolution.txt',
-        np.stack((result.frequency, result.correlation), axis=1),
-        header=f'{verdict}\nfrequency fsc',
-    )
 
+    # The orientations first, so that they are kept whatever happens to
+    # the average.
     from .io.star import Metadata
 
     if isinstance(source.metadata, Metadata):
@@ -329,6 +314,38 @@ def _run_pipeline(
             header='nine matrix entries then the centre in voxels (x y z)',
         )
 
+    # The average from the particles as they were extracted, not from the
+    # band the alignment worked on.
+    from .reconstruction import reconstruct
+
+    with jax.default_device(resolve_device(device)):
+        full = reconstruct(
+            source.data,
+            result.orientations,
+            result.shifts,
+            size,
+            weight_paths=None if (tilt or cone) else source.weights,
+            weight_transform=weight_transform,
+            tilt=tilt,
+            cone=cone,
+        )
+    write_spectrum(directory / 'average.mrc', full.structure, full.pixel_size)
+    write_map(
+        directory / 'support.mrc',
+        np.fft.fftshift(full.support),
+        full.pixel_size,
+    )
+    if np.isfinite(full.resolution):
+        verdict = f'resolution {full.resolution:.2f} A'
+    else:
+        verdict = f'the halves agree to Nyquist, {2 * full.pixel_size:.2f} A'
+    edge = f'{result.band_limit:.2f} A'
+    np.savetxt(
+        directory / 'resolution.txt',
+        np.stack((full.frequency, full.correlation), axis=1),
+        header=f'{verdict}; aligned up to {edge}\nfrequency fsc',
+    )
+
     logger.info('Wrote the results to %s.', directory)
     print(
         f'{len(subtomograms)} particles, {int(result.kept.sum())} of '
@@ -346,12 +363,16 @@ def _run_pipeline(
             f'symmetry asked for {symmetry}, but the pairs look more like '
             f'{result.detected}'
         )
-    if np.isfinite(result.resolution):
-        print(f'resolution {result.resolution:.1f} A')
+    if np.isfinite(full.resolution):
+        print(
+            f'resolution {full.resolution:.1f} A, at {full.pixel_size:.2f} A '
+            f'a pixel; aligned up to {result.band_limit:.1f} A, and the halves '
+            'were aligned together, so the curve is fair only beyond that'
+        )
     else:
         print(
-            f'the halves agree to the edge of the band analysed, '
-            f'{result.band_limit:.1f} A'
+            f'the halves agree to Nyquist, {2 * full.pixel_size:.1f} A; '
+            f'aligned up to {result.band_limit:.1f} A'
         )
 
 

@@ -65,6 +65,14 @@ The first run on real data, EMPIAR-10304.
 
 ### Added
 
+- `reconstruction.reconstruct`: the average at the size and pixel the
+  particles were extracted at, read again in chunks after the run.
+  vitrio reads the next chunk while the device prepares and adds this
+  one, and the preparation the loader does on the host is done on the
+  device, so neither waits for the other. `average.mrc`, `support.mrc`
+  and `resolution.txt` are now this.
+- `averaging.average_sums`, `ratio` and `contribution`, the parts an
+  average is made of, so that it can be made a chunk at a time.
 - Each particle's confidence, the share of its pairs that look right, as
   `rlnMaxValueProbDistribution` in the STAR file written, and nought for
   a particle the trusted pairs do not hold to the rest. It tells picks of

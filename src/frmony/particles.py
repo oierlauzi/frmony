@@ -200,6 +200,7 @@ def load_subtomograms(
     mask_radius: float | None = None,
     batch: int = 32,
     groups: Sequence[Hashable] | None = None,
+    show_progress: bool = True,
 ) -> Subtomograms:
     """Read subtomograms and put them into the form the matching takes.
 
@@ -226,6 +227,8 @@ def load_subtomograms(
             particle, such as the name of its tomogram. Particles with
             the same label share a noise spectrum. None puts them all in
             one.
+        show_progress: Show a bar while reading, if the log is shown.
+            Off for a caller that reads in chunks and shows its own.
 
     Returns:
         The loaded `Subtomograms`.
@@ -332,7 +335,12 @@ def load_subtomograms(
             ) from error
 
     window = _WINDOW
-    bar = progress(range(len(data_paths)), 'Reading particles', unit='particle')
+    bar = progress(
+        range(len(data_paths)),
+        'Reading particles',
+        unit='particle',
+        disable=not show_progress,
+    )
     pending = start(0, min(window, len(data_paths)))
     for begin in range(0, len(data_paths), window):
         end = min(begin + window, len(data_paths))

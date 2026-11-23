@@ -26,6 +26,7 @@ def progress[T](
     total: int | None = None,
     unit: str = 'it',
     scale: int = 1,
+    disable: bool = False,
 ) -> tqdm[T]:
     """Wrap an iterable in a bar, shown only if frmony logs information.
 
@@ -36,6 +37,7 @@ def progress[T](
         unit: What one of them is called.
         scale: How many units each item stands for, so that a bar over
             chunks of pairs can count pairs.
+        disable: Hide it whatever the log says.
     """
     bar: tqdm[T] = tqdm(
         items,
@@ -43,7 +45,7 @@ def progress[T](
         total=total,
         unit=unit,
         unit_scale=scale if scale != 1 else False,
-        disable=not _LOGGER.isEnabledFor(logging.INFO),
+        disable=disable or not _LOGGER.isEnabledFor(logging.INFO),
         dynamic_ncols=True,
         leave=True,
     )
