@@ -33,7 +33,8 @@ from numpy.typing import NDArray
 from ._progress import progress
 from ._transfers import to_device, to_host
 from .averaging import (
-    contribution,
+    accumulate,
+    empty_sums,
     fourier_shell_correlation,
     ratio,
     resolution_at,
@@ -96,34 +97,24 @@ def _half_index(size: int) -> NDArray[np.int64]:
 
 
 @functools.partial(jax.jit, static_argnames=('crop', 'transform'))
-def _accumulate(
-    sums: tuple[jax.Array, jax.Array],
+def _prepare(
     volumes: jax.Array,
     stored: jax.Array | None,
     shared: jax.Array | None,
     index: jax.Array,
-    rotations: jax.Array,
-    shifts: jax.Array,
-    halves: jax.Array,
-    grid: jax.Array,
     crop: int,
     transform: str,
 ) -> tuple[jax.Array, jax.Array]:
-    """Prepare a chunk as the loader would, and add it to the sums.
-
-    ``halves`` says which half each particle goes to, and padding goes to
-    neither: its value is two.
-    """
+    """A chunk of particles put in the form the averaging takes, on the
+    device: what the loader does on the host, done here instead."""
     box = volumes.shape[-1]
     start = box // 2 - crop // 2
     cut = slice(start, start + crop)
     middle = crop // 2
     axes = (-3, -2, -1)
 
-    def one(
-        carry: tuple[jax.Array, jax.Array], inputs: tuple[jax.Array, ...]
-    ) -> tuple[tuple[jax.Array, jax.Array], None]:
-        volume, raw, rotation, shift, half = inputs
+    def one(inputs: tuple[jax.Array, jax.Array]) -> tuple[jax.Array, jax.Array]:
+        volume, raw = inputs
         spectrum = jnp.fft.fftshift(
             jnp.fft.fftn(jnp.fft.ifftshift(volume, axes=axes), axes=axes),
             axes=axes,
@@ -143,18 +134,16 @@ def _accumulate(
         # `frmony.particles.whiten`, as the loader does it.
         measured = transfer > _WHITEN_FLOOR * jnp.max(transfer)
         amplitude = jnp.sqrt(jnp.where(measured, transfer, 1.0))
-        data = jnp.where(measured, spectrum / amplitude, 0.0)
-        weight = jnp.where(measured, amplitude, 0.0)
-        share, support = contribution(data, weight, rotation, shift, grid)
-        top, bottom = carry
-        select = (jnp.arange(2) == half)[:, None, None, None]
-        return (top + select * share, bottom + select * support), None
+        return (
+            jnp.where(measured, spectrum / amplitude, 0.0).astype(
+                jnp.complex64
+            ),
+            jnp.where(measured, amplitude, 0.0).astype(jnp.float32),
+        )
 
     raws = stored if stored is not None else jnp.zeros((len(volumes), 1))
-    result, _ = jax.lax.scan(
-        one, sums, (volumes, raws, rotations, shifts, halves)
-    )
-    return result
+    prepared: tuple[jax.Array, jax.Array] = jax.lax.map(one, (volumes, raws))
+    return prepared
 
 
 def reconstruct(
@@ -236,10 +225,7 @@ def reconstruct(
             )
         return reads, volumes, stored
 
-    sums = (
-        jnp.zeros((2, crop, crop, crop), dtype=jnp.complex64),
-        jnp.zeros((2, crop, crop, crop), dtype=jnp.float32),
-    )
+    sums = empty_sums(crop)
     # A centre comes in voxels of the box; the spectra are a voxel short
     # of it if the box was odd.
     moves = shifts * (crop / box)
@@ -264,18 +250,22 @@ def reconstruct(
         rotations[: end - begin] = orientations[begin:end]
         centres = np.zeros((chunk, 3))
         centres[: end - begin] = moves[begin:end]
-        sums = _accumulate(
-            sums,
+        data, weight = _prepare(
             to_device(volumes),
             None if stored is None else to_device(stored),
             shared,
             index if index is not None else to_device(np.zeros(1, np.int64)),
+            crop,
+            weight_transform,
+        )
+        sums = accumulate(
+            sums,
+            data,
+            weight,
             to_device(rotations, dtype=jnp.float32),
             to_device(centres, dtype=jnp.float32),
             to_device(halves),
             grid,
-            crop,
-            weight_transform,
         )
 
     top, bottom = sums

@@ -224,6 +224,14 @@ thousand, on five sets of pairs: the residual already puts right pairs
 at 0.94 to 0.99 and wrong ones at 0.03 to 0.10. What did matter was
 running enough rounds for the weights to settle; see `Design.rounds`.
 
+**Compare runs up to the global rotation.** Two runs that agree pair for
+pair can come out with every orientation turned by the same seventy
+degrees, because synchronization fixes the orientations only up to one
+rotation and settles it anew from rounding. Compare what the
+orientations say about pairs, or something no rotation changes, such as
+the shell correlation, never the orientations or the averages as they
+stand.
+
 **Whose weight goes in the denominator matters.** With the same numerator,
 normalizing each particle's energy by its own weight over the region both
 measured aligned 37 pairs in a hundred. Letting the partner's weight into
@@ -286,10 +294,13 @@ Do not claim otherwise in documentation or commit messages.
   are not in this repository.
 - Standardizing each voxel over the particles, which is what gives the
   amplitudes any use, is not in the package.
-- The memory formula in `pipeline.Design` is reasoned, not measured. What
-  is measured: 10357 particles in a band of 38 fit on a 32 GB device and
-  align at about half a millisecond a pair. Two runs at once do not fit,
-  since each takes most of the device for itself.
+- Working in blocks, `frmony.blocks`, has only run on the host, standing
+  in as a device. It gives the pairs and scores of holding every particle
+  at once, to rounding, but its speed and the memory it really takes on a
+  GPU are unmeasured, and so is the share of the device, a half, it
+  leaves for the pairs in flight. What is measured is the other side: all
+  10357 particles of a band of 38 held at once on a 32 GB device, at
+  about half a millisecond a pair.
 
 ## Style
 

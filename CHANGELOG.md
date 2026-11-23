@@ -65,6 +65,14 @@ The first run on real data, EMPIAR-10304.
 
 ### Added
 
+- `blocks`: particles that do not fit on the device are handed to it a
+  block at a time, sized from what it has or from `--memory`. Pairs are
+  aligned a pair of blocks at a time, the next block travelling while
+  the current ones are worked on, and the averages are summed a block at
+  a time. When everything fits there is one block, as before.
+- `matching.align_chunk` and `Particles`: a chunk of pairs aligned from
+  two sets of particles read as one, which is what lets a pair span two
+  blocks without the two being joined.
 - `reconstruction.reconstruct`: the average at the size and pixel the
   particles were extracted at, read again in chunks after the run.
   vitrio reads the next chunk while the device prepares and adds this

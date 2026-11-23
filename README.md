@@ -55,6 +55,10 @@ centres found and aligns again, which particles that are off centre need.
 `--root` is the RELION project, which is what the paths in the table are
 relative to.
 
+The particles do not have to fit on the device. What does not is handed
+to it a block at a time, which takes longer but gives the same result.
+`--memory` says how much to plan for, if not what the device reports.
+
 Plain volumes, with the missing wedge given on the command line:
 
 ```bash

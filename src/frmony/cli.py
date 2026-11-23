@@ -179,6 +179,13 @@ def _add_run(commands: Any, shared: argparse.ArgumentParser) -> None:
         'memory. Turning it up has been measured to be slower.',
     )
     parser.add_argument(
+        '--memory',
+        type=_positive,
+        help='Device memory to plan for [GB]. What the device says it has '
+        'if not given. Particles that do not fit are handed to it a block '
+        'at a time, so a small device takes longer but not less.',
+    )
+    parser.add_argument(
         '--seed', type=int, default=0, help='Which pairs get chosen.'
     )
     parser.add_argument(
@@ -229,6 +236,7 @@ def _run_pipeline(
     rounds: int,
     reject_above: float,
     batch: int,
+    memory: float | None,
     seed: int,
     refine: bool,
     passes: int,
@@ -279,6 +287,7 @@ def _run_pipeline(
             rounds=rounds,
             reject_above=reject_above if reject_above > 0.0 else None,
             batch=batch,
+            memory=memory,
             seed=seed,
             refine=refine,
             passes=passes,

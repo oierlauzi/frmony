@@ -15,6 +15,7 @@ from __future__ import annotations
 import functools
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import jax
@@ -23,21 +24,28 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ._transfers import to_device, to_host
-from .averaging import average, fourier_shell_correlation, resolution_at
-from .graph import bridges, build_pairs, is_connected
-from .graph import pieces as pieces_of
+from .averaging import fourier_shell_correlation, resolution_at
+from .blocks import (
+    align_in_blocks,
+    average_in_blocks,
+    block_size,
+    pad_to,
+    per_particle,
+)
+from .graph import bridges, build_pairs, is_connected, pieces
 from .harmonics.shells import band_radii
 from .harmonics.transform import Basis, make_basis
 from .matching.correlation import Expansion, expand_particle
 from .matching.pairwise import (
     Joint,
+    Particles,
     Settings,
-    align_pairs,
+    align_chunk,
     lattice_spacing,
     shift_lattice,
 )
 from .matching.refine import refine_alignment
-from .particles import Subtomograms, recentred
+from .particles import Subtomograms, recentred_on_host
 from .symmetry import detect_symmetry
 from .synchronization.rotations import synchronize_rotations
 from .synchronization.translations import synchronize_shifts
@@ -103,6 +111,10 @@ class Design:
     waiting on dispatch and not measured.
 
     Turn it down if a device runs out of memory."""
+    memory: float | None = None
+    """Device memory to plan for [GB]. None takes what the device says it
+    has. Particles that do not fit are handed to it a block at a time;
+    see `frmony.blocks`."""
     refine: bool = False
     """Polish each pair against the score itself after the grid search.
     Off by default; `frmony.matching.refine` says why."""
@@ -228,6 +240,57 @@ def _expand_stretch(
     return expanded
 
 
+def _particles_on_device(
+    data: NDArray[np.complex64],
+    weight: NDArray[np.float32],
+    size: int,
+    basis: Basis,
+    phases: bool,
+    batch: int,
+) -> Callable[[int, int], Particles]:
+    """What hands a block of particles to the device, ready to align.
+
+    Each call dispatches and returns at once: the block travels and is
+    expanded while the device finishes what it was given before.
+    """
+
+    def make(start: int, stop: int) -> Particles:
+        spectra = to_device(pad_to(data[start:stop], size))
+        # Two particles are compared over the frequencies both measured,
+        # and not in proportion to how well. A weight that follows the
+        # transfer is largest where every tilt overlaps, on the tilt axis
+        # and at the lowest frequencies, which is also where what
+        # surrounds the particle is strongest, and that is not noise the
+        # weight knows about. Counting those frequencies by their weight
+        # once more took the pairs aligned correctly on EMPIAR-10304 from
+        # eighteen in a hundred to five. The average does use the weight,
+        # as it must to undo the transfer.
+        measured = (to_device(pad_to(weight[start:stop], size)) > 0.0).astype(
+            jnp.float32
+        )
+        return Particles(
+            data=spectra,
+            weight=measured,
+            expansions=_expand_stretch(spectra, measured, basis, phases, batch),
+        )
+
+    return make
+
+
+def _spectra_on_device(
+    data: NDArray[np.complex64], weight: NDArray[np.float32], size: int
+) -> Callable[[int, int], tuple[jax.Array, jax.Array]]:
+    """What hands a block of spectra and weights to the device, to average."""
+
+    def make(start: int, stop: int) -> tuple[jax.Array, jax.Array]:
+        return (
+            to_device(pad_to(data[start:stop], size)),
+            to_device(pad_to(weight[start:stop], size)),
+        )
+
+    return make
+
+
 def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
     """Align, synchronize and average a set of subtomograms.
 
@@ -292,68 +355,26 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
     in_band = (
         (distance >= float(radii[0])) & (distance <= float(radii[-1]) + 0.5)
     ).astype(jnp.float32)
+    batch = max(design.batch, 1)
+    size = block_size(
+        count,
+        per_particle(subtomograms.band, len(radii), design.bandwidth),
+        None if design.memory is None else design.memory * 2**30,
+    )
     applied = np.zeros((count, 3))
     for number in range(design.passes):
-        # The one crossing the particles make. Everything after this reads
-        # them from the device, so a thousand particles cost one copy and not
-        # a thousand. Expanding them in a Python loop instead, which is what
-        # this used to do, sent each particle over and brought its
-        # coefficients back, and then sent those over again to align with.
+        # The particles, brought back to where they are believed to be,
+        # stay on the host. The device is handed them a block at a time,
+        # or all at once if they fit; see `frmony.blocks`.
         started = time.perf_counter()
-        data, weight = recentred(
+        data, weight = recentred_on_host(
             subtomograms,
             applied if number else None,
             design.batch,
             noise=design.noise_spectrum,
         )
-        # Two particles are compared over the frequencies both measured, and
-        # not in proportion to how well. A weight that follows the transfer
-        # is largest where every tilt overlaps, on the tilt axis and at the
-        # lowest frequencies, which is also where what surrounds the particle
-        # is strongest, and that is not noise the weight knows about. Counting
-        # those frequencies by their weight once more took the pairs aligned
-        # correctly on EMPIAR-10304 from eighteen in a hundred to five. The
-        # average below does use the weight, as it must to undo the transfer.
-        measured = (weight > 0.0).astype(weight.dtype)
-        # The weight itself is only wanted again for the average. Holding
-        # it here through the alignment is a quarter of what the
-        # particles take, for nothing.
-        del weight
-        # A stretch of the particles at a time. One map over all of
-        # them holds every expansion twice while it puts them together,
-        # which is the largest thing on the device.
-        reach_at_once = max(design.batch, 1) * 32
-        pieces = [
-            _expand_stretch(
-                data[start : start + reach_at_once],
-                measured[start : start + reach_at_once],
-                basis,
-                design.phases,
-                max(design.batch, 1),
-            )
-            for start in range(0, count, reach_at_once)
-        ]
-        # Put together one leaf at a time, letting go of its pieces
-        # before the next, so that only a third is ever held twice.
-        layout = jax.tree.structure(pieces[0])
-        scattered = [
-            list(parts)
-            for parts in zip(
-                *(jax.tree.leaves(piece) for piece in pieces), strict=True
-            )
-        ]
-        del pieces
-        joined = []
-        for parts in scattered:
-            joined.append(jnp.concatenate(parts))
-            parts.clear()
-        expansions = jax.tree.unflatten(layout, joined)
-        del joined
-        # The timing above means nothing without this: JAX dispatches
-        # asynchronously, so the loop returns before the work is done.
-        jax.tree.map(lambda leaf: leaf.block_until_ready(), expansions)
         _LOGGER.info(
-            'Expanded %d particles in %.1f s.',
+            'Prepared %d particles in %.1f s.',
             count,
             time.perf_counter() - started,
         )
@@ -377,16 +398,22 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
                 spacing,
             )
         started = time.perf_counter()
-        aligned = align_pairs(
-            data,
-            measured,
-            expansions,
+        aligned = align_in_blocks(
+            count,
+            size,
+            _particles_on_device(
+                data, weight, size, basis, design.phases, batch
+            ),
             left,
             right,
-            settings,
-            batch=design.batch,
-            band=in_band,
-            joint=joint,
+            functools.partial(
+                align_chunk,
+                settings=settings,
+                band=in_band,
+                joint=joint,
+                batch=batch,
+            ),
+            batch,
         )
         elapsed = time.perf_counter() - started
         _LOGGER.info(
@@ -396,9 +423,9 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
             1e3 * elapsed / max(len(left), 1),
         )
 
-        measurements = to_host(aligned.rotation, dtype=np.float64)
-        measured_shifts = to_host(aligned.shift, dtype=np.float64)
-        scores = to_host(aligned.score, dtype=np.float64)
+        measurements = aligned.rotation.astype(np.float64)
+        measured_shifts = aligned.shift.astype(np.float64)
+        scores = aligned.score.astype(np.float64)
 
         if design.refine:
             started = time.perf_counter()
@@ -465,7 +492,7 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
         orientations = synchronized.orientations
 
         kept = synchronized.kept
-        piece = pieces_of(count, left[kept], right[kept])
+        piece = pieces(count, left[kept], right[kept])
         held = piece == 0
         sizes = np.bincount(piece)
         # A piece of its own frame only matters if it is big enough to
@@ -526,9 +553,6 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
             # again: a pair whose particles are centred is a pair the
             # rotational search can see.
             applied = applied + centres
-            # Let go of this pass before the next is built. Held over,
-            # the particles and their expansions are on the device twice.
-            del data, measured, expansions, aligned
             _LOGGER.info(
                 'Pass %d moved the centres by a median of %.2f voxels of the '
                 'band.',
@@ -536,14 +560,18 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
                 float(np.median(np.linalg.norm(centres, axis=1))),
             )
 
-    weight = to_device(subtomograms.weight)
-    structure, support = average(data, weight, orientations, centres)
-    halves = []
-    for half in (np.arange(count) % 2 == 0, np.arange(count) % 2 == 1):
-        part, _ = average(
-            data[half], weight[half], orientations[half], centres[half]
-        )
-        halves.append(to_host(part))
+    averaged = average_in_blocks(
+        count,
+        size,
+        _spectra_on_device(data, weight, size),
+        orientations,
+        centres,
+    )
+    structure, support, halves = (
+        averaged.structure,
+        averaged.support,
+        averaged.halves,
+    )
     frequency, correlation = fourier_shell_correlation(halves[0], halves[1])
     # The band was cropped, so a shell's frequency is a fraction of the
     # cropped sampling rate; the pixel size that goes with it is coarser
@@ -584,8 +612,8 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
         measured_shifts=measured_shifts,
         residuals=synchronized.residuals,
         kept=kept,
-        structure=to_host(structure),
-        support=to_host(support),
+        structure=structure,
+        support=support,
         frequency=frequency,
         correlation=correlation,
         resolution=resolution,

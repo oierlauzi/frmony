@@ -39,10 +39,13 @@ from .translation import frequency_grid, shift_correlation
 __all__ = [
     'Alignment',
     'Joint',
+    'Particles',
     'Settings',
+    'align_chunk',
     'align_pair',
     'align_pairs',
     'candidate_rotations',
+    'chunk_of',
     'lattice_spacing',
     'shift_lattice',
     'truncate',
@@ -546,15 +549,13 @@ def align_pairs(
     )
     count = len(pairs)
     batch = max(batch, 1)
+    particles = Particles(data=volumes, weight=weights, expansions=batched)
 
     # The pairs go to the device a chunk at a time, so that a run can say
-    # how far it has got. A chunk is a hundredth of them, a whole number
-    # of batches and never fewer than sixty-four, which is large enough
-    # that handing them over costs nothing measurable. Every chunk is
-    # the same size, the last padded with its own last pair, so the
-    # program is compiled once.
-    chunk = max(-(-count // 100), 64 * batch)
-    chunk = min(-(-chunk // batch) * batch, -(-count // batch) * batch)
+    # how far it has got, large enough that handing them over costs
+    # nothing measurable. Every chunk is the same size, the last padded
+    # with its own last pair, so the program is compiled once.
+    chunk = chunk_of(count, batch)
     chunks = -(-count // chunk)
     padded = np.concatenate(
         (pairs, np.repeat(pairs[-1:], chunks * chunk - count, axis=0))
@@ -564,10 +565,9 @@ def align_pairs(
     for indices in progress(
         padded, 'Aligning pairs', total=chunks, unit='pair', scale=chunk
     ):
-        piece = _align_chunk(
-            volumes,
-            weights,
-            batched,
+        piece = align_chunk(
+            particles,
+            particles,
             to_device(indices),
             settings,
             band,
@@ -583,32 +583,65 @@ def align_pairs(
     return aligned
 
 
+@dataclass(frozen=True)
+class Particles:
+    """Particles on the device, for pairs to be read from."""
+
+    data: jax.Array
+    """Centred spectra ``(particles, n, n, n)``."""
+    weight: jax.Array
+    """Their weights, the same shape."""
+    expansions: Expansion
+    """Their expansions, batched over the leading axis."""
+
+
+jax.tree_util.register_dataclass(
+    Particles, data_fields=['data', 'weight', 'expansions'], meta_fields=[]
+)
+
+
+def _pick(first: Particles, second: Particles, index: jax.Array) -> Particles:
+    """One particle, from the first set if its index falls there and from
+    the second, after the first, if not. Both are read and one is kept:
+    a particle is small, and two sets never have to be joined into one,
+    which would hold both twice."""
+    size = first.data.shape[0]
+    mine = jnp.clip(index, 0, size - 1)
+    theirs = jnp.clip(index - size, 0, second.data.shape[0] - 1)
+    inside = index < size
+    picked: Particles = jax.tree.map(
+        lambda a, b: jnp.where(inside, a[mine], b[theirs]), first, second
+    )
+    return picked
+
+
 @functools.partial(jax.jit, static_argnames=('settings', 'batch'))
-def _align_chunk(
-    volumes: jax.Array,
-    weights: jax.Array,
-    expansions: Expansion,
+def align_chunk(
+    first: Particles,
+    second: Particles,
     pairs: jax.Array,
     settings: Settings,
     band: jax.Array | None,
     joint: Joint | None,
     batch: int,
 ) -> Alignment:
-    """Align a chunk of pairs, ``(pairs, 2)`` indices into the particles.
+    """Align a chunk of pairs, ``(pairs, 2)`` indices into the particles of
+    ``first`` and then ``second``, as though the two were one set.
 
     Everything is an argument, and nothing is closed over. Closed over,
     the particles would be folded into the program as constants.
     """
 
     def one(indices: jax.Array) -> Alignment:
-        first, second = indices[0], indices[1]
+        a = _pick(first, second, indices[0])
+        b = _pick(first, second, indices[1])
         return align_pair(
-            volumes[first],
-            weights[first],
-            volumes[second],
-            weights[second],
-            jax.tree.map(lambda leaf: leaf[first], expansions),
-            jax.tree.map(lambda leaf: leaf[second], expansions),
+            a.data,
+            a.weight,
+            b.data,
+            b.weight,
+            a.expansions,
+            b.expansions,
             settings,
             band,
             joint,
@@ -616,3 +649,11 @@ def _align_chunk(
 
     aligned: Alignment = jax.lax.map(one, pairs, batch_size=batch)
     return aligned
+
+
+def chunk_of(count: int, batch: int) -> int:
+    """How many pairs to hand the device at once: a hundredth of them, a
+    whole number of batches and never fewer than sixty-four."""
+    batch = max(batch, 1)
+    chunk = max(-(-count // 100), 64 * batch)
+    return int(min(-(-chunk // batch) * batch, -(-count // batch) * batch))

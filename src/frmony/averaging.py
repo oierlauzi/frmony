@@ -32,9 +32,11 @@ from ._transfers import to_device
 from .matching.translation import frequency_grid, rotate_spectrum
 
 __all__ = [
+    'accumulate',
     'average',
     'average_sums',
     'contribution',
+    'empty_sums',
     'fourier_shell_correlation',
     'ratio',
     'resolution_at',
@@ -131,6 +133,59 @@ def average_sums(
         accumulate, start, (data, weight, rotations, shifts)
     )
     return top, bottom
+
+
+@jax.jit
+def accumulate(
+    sums: tuple[jax.Array, jax.Array],
+    data: jax.Array,
+    weight: jax.Array,
+    rotations: jax.Array,
+    shifts: jax.Array,
+    halves: jax.Array,
+    grid: jax.Array,
+) -> tuple[jax.Array, jax.Array]:
+    """Add a block of particles to the sums of two half averages.
+
+    The sums are ``(2, n, n, n)``, one for each half. ``halves`` says
+    which half each particle goes to, and a particle whose half is
+    neither nought nor one -- padding, which keeps every block the same
+    shape and so compiles this once -- goes to neither. The average of all
+    of them is the ratio of the two halves' sums added.
+
+    Args:
+        sums: What the blocks before added up to.
+        data: Centred spectra ``(particles, n, n, n)``.
+        weight: Their weights, the same shape.
+        rotations: Orientations ``(particles, 3, 3)``.
+        shifts: Centres ``(particles, 3)``, in voxels of the spectra.
+        halves: ``(particles,)``, nought, one, or anything else for none.
+        grid: `frmony.matching.translation.frequency_grid` of ``n``, on
+            the device. An argument and not built here, where it would be
+            folded into the program and uploaded under no name.
+    """
+
+    def one(
+        carry: tuple[jax.Array, jax.Array], inputs: tuple[jax.Array, ...]
+    ) -> tuple[tuple[jax.Array, jax.Array], None]:
+        spectrum, mask, rotation, shift, half = inputs
+        share, support = contribution(spectrum, mask, rotation, shift, grid)
+        top, bottom = carry
+        select = (jnp.arange(2) == half)[:, None, None, None]
+        return (top + select * share, bottom + select * support), None
+
+    result, _ = jax.lax.scan(
+        one, sums, (data, weight, rotations, shifts, halves)
+    )
+    return result
+
+
+def empty_sums(size: int) -> tuple[jax.Array, jax.Array]:
+    """Sums of two half averages with nothing added yet."""
+    return (
+        jnp.zeros((2, size, size, size), dtype=jnp.complex64),
+        jnp.zeros((2, size, size, size), dtype=jnp.float32),
+    )
 
 
 def ratio(

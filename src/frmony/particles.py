@@ -35,6 +35,7 @@ __all__ = [
     'load_subtomograms',
     'noise_spectra',
     'recentred',
+    'recentred_on_host',
     'whiten',
 ]
 
@@ -432,6 +433,17 @@ def recentred(
     batch: int = 32,
     noise: bool = True,
 ) -> tuple[jax.Array, jax.Array]:
+    """`recentred_on_host`, with what it gives put on the device whole."""
+    data, weight = recentred_on_host(subtomograms, centres, batch, noise)
+    return to_device(data), to_device(weight)
+
+
+def recentred_on_host(
+    subtomograms: Subtomograms,
+    centres: NDArray[np.float64] | None = None,
+    batch: int = 32,
+    noise: bool = True,
+) -> tuple[NDArray[np.complex64], NDArray[np.float32]]:
     """The particles brought back to their centres and masked there.
 
     Each spectrum is taken back to what was stored, moved, masked in real
@@ -450,11 +462,12 @@ def recentred(
             see `noise_spectra`.
 
     Returns:
-        The spectra and their weights, on the device.
+        The spectra and their weights, on the host, so that a caller with
+        a small device can hand them over a block at a time.
     """
     if subtomograms.mask_radius is None and centres is None:
         if not noise:
-            return to_device(subtomograms.data), to_device(subtomograms.weight)
+            return subtomograms.data, subtomograms.weight
         moved = np.array(subtomograms.data)
         return _with_noise_spectrum(subtomograms, moved)
 
@@ -491,7 +504,7 @@ def recentred(
             )
         )
     if not noise:
-        return to_device(moved), to_device(subtomograms.weight)
+        return moved, subtomograms.weight
     return _with_noise_spectrum(subtomograms, moved)
 
 
@@ -569,7 +582,7 @@ def noise_spectra(
 
 def _with_noise_spectrum(
     subtomograms: Subtomograms, moved: NDArray[np.complex64]
-) -> tuple[jax.Array, jax.Array]:
+) -> tuple[NDArray[np.complex64], NDArray[np.float32]]:
     """Divide the spectra and their weights by the noise of their group.
 
     A spectrum is then its weight times the structure, plus noise of unit
@@ -598,4 +611,4 @@ def _with_noise_spectrum(
         scale = scales[labels[start:stop]]
         moved[start:stop] *= scale
         weight[start:stop] = subtomograms.weight[start:stop] * scale
-    return to_device(moved), to_device(weight)
+    return moved, weight
