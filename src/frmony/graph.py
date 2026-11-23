@@ -17,7 +17,13 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
-__all__ = ['bridges', 'build_pairs', 'is_connected', 'spanning_tree']
+__all__ = [
+    'bridges',
+    'build_pairs',
+    'is_connected',
+    'pieces',
+    'spanning_tree',
+]
 
 
 def _ring_pairs(count: int, jumps: int) -> set[tuple[int, int]]:
@@ -128,6 +134,23 @@ def _labels(
     return np.array([find(index) for index in range(count)], dtype=np.int64)
 
 
+def pieces(
+    count: int, left: NDArray[np.int64], right: NDArray[np.int64]
+) -> NDArray[np.int64]:
+    """Which piece of the graph each particle is in, ``(count,)``.
+
+    The pieces are numbered from the largest, which is piece nought; a
+    particle no pair touches is a piece of its own.
+    """
+    labels = _labels(count, np.asarray(left), np.asarray(right))
+    _, inverse, sizes = np.unique(
+        labels, return_inverse=True, return_counts=True
+    )
+    rank = np.empty_like(sizes)
+    rank[np.argsort(-sizes, kind='stable')] = np.arange(len(sizes))
+    return rank[inverse].astype(np.int64)
+
+
 def is_connected(
     count: int, left: NDArray[np.int64], right: NDArray[np.int64]
 ) -> bool:
@@ -183,7 +206,10 @@ def spanning_tree(
 
 
 def bridges(
-    count: int, left: NDArray[np.int64], right: NDArray[np.int64]
+    count: int,
+    left: NDArray[np.int64],
+    right: NDArray[np.int64],
+    smallest: int = 1,
 ) -> NDArray[np.int64]:
     """Pairs whose removal would break the graph into pieces.
 
@@ -203,9 +229,28 @@ def bridges(
     Found by depth-first search: an edge is a bridge when the subtree below
     it can reach nothing above it except through the edge itself.
 
+    Args:
+        count: How many particles there are.
+        left: First particle of each pair.
+        right: Second particle of each pair.
+        smallest: Only the bridges that would cut off at least this many
+            particles. A bridge to one particle that nothing else holds
+            puts nothing in doubt but that particle, and on real data
+            there are many: a pick of something else has one pair that
+            looks right by chance, and that pair is a bridge.
+
     Returns:
         Indices of the pairs that are bridges, possibly none.
     """
+    found, cut_off = _bridges(count, left, right)
+    return found[cut_off >= smallest]
+
+
+def _bridges(
+    count: int, left: NDArray[np.int64], right: NDArray[np.int64]
+) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
+    """Every bridge, and how many particles it would cut off: the
+    smaller of the two sides."""
     neighbours: dict[int, list[tuple[int, int]]] = {}
     for edge, (first, second) in enumerate(zip(left, right, strict=True)):
         neighbours.setdefault(int(first), []).append((int(second), edge))
@@ -214,12 +259,15 @@ def bridges(
     seen = np.zeros(count, dtype=bool)
     entered = np.zeros(count, dtype=np.int64)
     lowest = np.zeros(count, dtype=np.int64)
+    below = np.ones(count, dtype=np.int64)
     found: list[int] = []
+    sides: list[int] = []
     clock = 0
 
     for root in range(count):
         if seen[root]:
             continue
+        first_found = len(found)
         # Explicit stack: a recursive search would overflow on the long
         # paths a ring of ten thousand particles makes.
         stack: list[tuple[int, int, int]] = [(root, -1, 0)]
@@ -246,6 +294,16 @@ def bridges(
                     else int(right[came_by])
                 )
                 lowest[parent] = min(lowest[parent], lowest[node])
+                below[parent] += below[node]
                 if lowest[node] > entered[parent]:
                     found.append(came_by)
-    return np.array(sorted(found), dtype=np.int64)
+                    sides.append(int(below[node]))
+        # The particles of this piece are what its root has below it.
+        whole = int(below[root])
+        for index in range(first_found, len(found)):
+            sides[index] = min(sides[index], whole - sides[index])
+    order = np.argsort(np.asarray(found, dtype=np.int64), kind='stable')
+    return (
+        np.asarray(found, dtype=np.int64)[order],
+        np.asarray(sides, dtype=np.int64)[order],
+    )

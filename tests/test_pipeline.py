@@ -545,3 +545,34 @@ def test_without_groups_the_particles_share_one_spectrum(
     data, weight, groups = _noisy_groups(rng, 10, 12)
     assert noise_spectra(data, weight, None).shape == (1, 12, 12, 12)
     assert noise_spectra(data, weight, groups).shape == (2, 12, 12, 12)
+
+
+def test_a_particle_that_is_not_one_has_little_confidence(
+    rng: np.random.Generator,
+) -> None:
+    """Picks of something else have no pair that looks right, and say so.
+
+    Twelve particles and four volumes of pure noise behind the same wedge.
+    Measured: 0.73 to 0.80 for the particles, nought to 0.07 for the
+    noise, two of which no trusted pair held to the rest at all.
+    """
+    count, noise = 12, 4
+    simulation, subtomograms = _subtomograms(rng, count, size=32, tilt=60.0)
+    junk = rng.normal(size=(noise, 32, 32, 32)) + 1j * rng.normal(
+        size=(noise, 32, 32, 32)
+    )
+    junk = (junk * simulation.weight[:noise]).astype(np.complex64)
+    mixed = Subtomograms(
+        data=np.concatenate((subtomograms.data, junk)),
+        weight=np.concatenate((subtomograms.weight, simulation.weight[:noise])),
+        pixel_size=subtomograms.pixel_size,
+        box=subtomograms.box,
+    )
+    result = run(
+        mixed, Design(partners=15, bandwidth=16, candidates=8, max_shift=1.0)
+    )
+    assert result.confidence is not None
+    assert result.confidence.shape == (count + noise,)
+    assert np.all((result.confidence >= 0.0) & (result.confidence <= 1.0))
+    assert result.confidence[count:].max() < result.confidence[:count].min()
+    assert np.isfinite(result.band_limit)

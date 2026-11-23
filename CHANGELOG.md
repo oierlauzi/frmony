@@ -52,8 +52,25 @@ The first run on real data, EMPIAR-10304.
   right, from a mixture fitted to the residuals. `--reject-above` is off
   by default.
 
+- A run warned that its particles were in more than one piece whenever a
+  pick of something else had no pair that looked right, which on real
+  data is always. It now says how many the trusted pairs hold together,
+  and warns only of a second piece of at least a hundredth of the
+  particles, and of bridges that cut off as many.
+- The summary named a symmetry the residuals looked like even when every
+  group scored within noise of the others. It names one only when the
+  pairs argue against the one asked for.
+- A resolution of infinity is reported as what it is: the halves agree to
+  the edge of the band analysed, which is given.
+
 ### Added
 
+- Each particle's confidence, the share of its pairs that look right, as
+  `rlnMaxValueProbDistribution` in the STAR file written, and nought for
+  a particle the trusted pairs do not hold to the rest. It tells picks of
+  a ribosome from picks of something else with an area under the curve of
+  0.91 to 0.93 on EMPIAR-10304.
+- `graph.pieces`, and `bridges(..., smallest=)`.
 - `particles.noise_spectra`: each tomogram's noise spectrum, measured
   from its particles. Particles are grouped by `rlnTomoName`. Off by
   default: it harmed whole runs.

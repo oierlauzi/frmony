@@ -295,10 +295,15 @@ def _run_pipeline(
         np.fft.fftshift(result.support),
         coarse,
     )
+    if np.isfinite(result.resolution):
+        verdict = f'resolution {result.resolution:.2f} A'
+    else:
+        edge = f'{result.band_limit:.2f} A'
+        verdict = f'the halves agree to the edge of the band, {edge}'
     np.savetxt(
         directory / 'resolution.txt',
         np.stack((result.frequency, result.correlation), axis=1),
-        header=f'resolution {result.resolution:.2f} A\nfrequency fsc',
+        header=f'{verdict}\nfrequency fsc',
     )
 
     from .io.star import Metadata
@@ -309,9 +314,7 @@ def _run_pipeline(
             source.metadata,
             result.orientations,
             result.shifts,
-            result.scores
-            if len(result.scores) == len(result.orientations)
-            else None,
+            result.confidence,
         )
     else:
         np.savetxt(
@@ -331,10 +334,25 @@ def _run_pipeline(
         f'{len(subtomograms)} particles, {int(result.kept.sum())} of '
         f'{len(result.left)} pairs kept.'
     )
-    print(
-        f'symmetry asked for {symmetry}, residuals look like {result.detected}'
-    )
-    print(f'resolution {result.resolution:.1f} A')
+    if result.confidence is not None:
+        held = int(np.sum(result.confidence > 0.0))
+        print(
+            f'{held} of them held together by the pairs that look right; '
+            "the share of each particle's pairs that do is written as "
+            'rlnMaxValueProbDistribution, nought for the rest.'
+        )
+    if result.symmetry_doubted:
+        print(
+            f'symmetry asked for {symmetry}, but the pairs look more like '
+            f'{result.detected}'
+        )
+    if np.isfinite(result.resolution):
+        print(f'resolution {result.resolution:.1f} A')
+    else:
+        print(
+            f'the halves agree to the edge of the band analysed, '
+            f'{result.band_limit:.1f} A'
+        )
 
 
 def _add_formats(commands: Any, shared: argparse.ArgumentParser) -> None:

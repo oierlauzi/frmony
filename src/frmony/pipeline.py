@@ -25,6 +25,7 @@ from numpy.typing import NDArray
 from ._transfers import to_device, to_host
 from .averaging import average, fourier_shell_correlation, resolution_at
 from .graph import bridges, build_pairs, is_connected
+from .graph import pieces as pieces_of
 from .harmonics.shells import band_radii
 from .harmonics.transform import Basis, make_basis
 from .matching.correlation import Expansion, expand_particle
@@ -184,7 +185,21 @@ class Result:
     resolution: float
     """Where that correlation falls below 0.143 [A]."""
     detected: str = 'C1'
-    """The point group the triangle residuals suggest."""
+    """The point group the triangle residuals suggest. Only worth reading
+    when `symmetry_doubted` is set: where nothing argues against the
+    group asked for, the groups score within noise of one another and the
+    name is whichever came out on top."""
+    symmetry_doubted: bool = False
+    """Whether the pairs argue against the symmetry asked for."""
+    confidence: NDArray[np.float64] | None = None
+    """For each particle, the share of its pairs that look right, and
+    nought for a particle outside the piece the trusted pairs hold
+    together, whose orientation means nothing. On EMPIAR-10304 it told
+    picks of a ribosome from picks of something else with an area under
+    the curve of 0.91 to 0.93."""
+    band_limit: float = float('inf')
+    """The finest detail the analysed band holds [A]. A resolution of
+    infinity means the halves agreed all the way to it."""
     scores_by_symmetry: dict[str, float] = field(default_factory=dict)
     """How much of those residuals each candidate group explains."""
 
@@ -410,6 +425,7 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
         weights = np.clip(0.5 * (1.0 + scores), 0.0, 1.0)
 
         detected = 'C1'
+        doubted = False
         by_symmetry: dict[str, float] = {}
         if design.detect:
             detected, by_symmetry = detect_symmetry(
@@ -421,7 +437,8 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
             # group asked for explains the residuals badly.
             asked = by_symmetry.get(design.symmetry)
             best = max(by_symmetry.values(), default=0.0)
-            if asked is not None and asked < best - 0.25:
+            doubted = asked is not None and asked < best - 0.25
+            if doubted:
                 _LOGGER.warning(
                     'The pairs look more like %s (%.2f) than %s (%.2f). If the '
                     'symmetry is wrong the orientations will be too.',
@@ -448,24 +465,46 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
         orientations = synchronized.orientations
 
         kept = synchronized.kept
-        if not is_connected(count, left[kept], right[kept]):
-            _LOGGER.warning(
-                'Rejecting outliers left the particles in more than one piece. '
-                'Each piece has its own frame and nothing relates them, so the '
-                'average is not meaningful. Ask for more partners, or raise '
-                'the rejection threshold.'
+        piece = pieces_of(count, left[kept], right[kept])
+        held = piece == 0
+        sizes = np.bincount(piece)
+        # A piece of its own frame only matters if it is big enough to
+        # show in the average; a hundredth of the particles is not.
+        matters = max(2, int(np.ceil(0.01 * count)))
+        if len(sizes) > 1:
+            _LOGGER.info(
+                'The trusted pairs hold %d of the %d particles together. The '
+                'other %d stand apart, %d of them alone, the rest in pieces '
+                'of at most %d: none of their pairs looks right, which is '
+                'what a pick of something else looks like, and their '
+                'orientations mean nothing.',
+                int(sizes[0]),
+                count,
+                count - int(sizes[0]),
+                int(np.sum(sizes == 1)),
+                int(sizes[1]),
             )
-        else:
-            weak = bridges(count, left[kept], right[kept])
-            if len(weak):
-                _LOGGER.warning(
-                    '%d of the surviving pairs are the only thing holding two '
-                    'groups of particles together. Everything those groups say '
-                    'about each other rests on one measurement apiece, which '
-                    'nothing can contradict, so it may be wrong without any '
-                    'residual showing it. Ask for more partners.',
-                    len(weak),
-                )
+        if len(sizes) > 1 and sizes[1] >= matters:
+            _LOGGER.warning(
+                '%d particles hang together apart from the %d of the largest '
+                'piece. Their pairs agree with one another but nothing '
+                'relates them to the rest, so they sit in a frame of their '
+                'own and blur the average. They may be a second kind of '
+                'particle. More partners would tell.',
+                int(sizes[1]),
+                int(sizes[0]),
+            )
+        weak = bridges(count, left[kept], right[kept], smallest=matters)
+        if len(weak):
+            _LOGGER.warning(
+                '%d of the trusted pairs are each the only thing holding a '
+                'group of at least %d particles to the rest. What those '
+                'groups say about each other rests on one measurement '
+                'apiece, which nothing can contradict, so it may be wrong '
+                'without any residual showing it. Ask for more partners.',
+                len(weak),
+                matters,
+            )
 
         # The centres are weighed as the orientations were: by how likely
         # each pair is to be right, as well as by its score.
@@ -509,10 +548,31 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
     # The band was cropped, so a shell's frequency is a fraction of the
     # cropped sampling rate; the pixel size that goes with it is coarser
     # than the one the particles were extracted at by the same factor.
-    resolution = resolution_at(
-        frequency, correlation, subtomograms.pixel_size * subtomograms.scale
+    sampled = subtomograms.pixel_size * subtomograms.scale
+    resolution = resolution_at(frequency, correlation, sampled)
+    band_limit = 2.0 * sampled
+    if np.isfinite(resolution):
+        _LOGGER.info('Resolution by half-set correlation: %.1f A.', resolution)
+    else:
+        _LOGGER.info(
+            'The halves agree to the edge of the band analysed, %.1f A, '
+            'which is as far as this can see. They were aligned together, '
+            'so it is a bound on how well they agree, not a gold standard. '
+            '--band looks further.',
+            band_limit,
+        )
+
+    # How much of each particle's evidence looks right.
+    trust = (
+        np.ones(len(left))
+        if synchronized.inliers is None
+        else synchronized.inliers
     )
-    _LOGGER.info('Resolution by half-set correlation: %.1f A.', resolution)
+    summed = np.bincount(left, trust, count) + np.bincount(right, trust, count)
+    touched = np.bincount(left, minlength=count) + np.bincount(
+        right, minlength=count
+    )
+    confidence = np.where(held, summed / np.maximum(touched, 1), 0.0)
 
     return Result(
         orientations=orientations,
@@ -531,4 +591,7 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
         resolution=resolution,
         detected=detected,
         scores_by_symmetry=by_symmetry,
+        symmetry_doubted=doubted,
+        confidence=confidence,
+        band_limit=band_limit,
     )

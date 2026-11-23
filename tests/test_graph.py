@@ -195,3 +195,35 @@ def test_a_particle_gets_about_the_partners_asked_for(
     degree = np.bincount(np.concatenate((left, right)), minlength=count)
     assert 0.75 * partners < degree.mean() <= partners
     assert degree.max() < 1.5 * partners
+
+
+def _clique(first: int, size: int) -> list[tuple[int, int]]:
+    return [
+        (first + i, first + j) for i in range(size) for j in range(i + 1, size)
+    ]
+
+
+def test_pieces_are_numbered_from_the_largest() -> None:
+    from frmony.graph import pieces
+
+    edges = _clique(0, 3) + _clique(3, 5)  # a piece of 3, then one of 5
+    left = np.array([a for a, _ in edges])
+    right = np.array([b for _, b in edges])
+    labels = pieces(10, left, right)  # and two particles nothing touches
+    assert np.all(labels[3:8] == 0)
+    assert np.all(labels[0:3] == 1)
+    assert sorted(labels[8:].tolist()) == [2, 3]
+
+
+def test_a_bridge_to_one_particle_can_be_passed_over() -> None:
+    """On real data a pick of something else hangs on by one pair that
+    looks right by chance. That bridge puts nothing in doubt but the one
+    particle, and asking for every bridge would cry wolf on each."""
+    edges = _clique(0, 6) + _clique(6, 4) + [(0, 6), (5, 10)]
+    left = np.array([a for a, _ in edges])
+    right = np.array([b for _, b in edges])
+    found = bridges(11, left, right)
+    assert len(found) == 2
+    cutting = bridges(11, left, right, smallest=2)
+    assert len(cutting) == 1
+    assert (left[cutting[0]], right[cutting[0]]) == (0, 6)
