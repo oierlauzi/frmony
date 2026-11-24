@@ -591,3 +591,37 @@ def test_weighing_beats_a_threshold_when_most_pairs_are_wrong(
     assert weighed.inliers is not None
     assert weighed.inliers[good].mean() > 0.9
     assert weighed.inliers[~good].mean() < 0.1
+
+
+def test_mirrors_are_synchronized_over_the_orthogonal_group(
+    rng: np.random.Generator,
+) -> None:
+    """A third of the particles mirror images. Over the orthogonal group
+    their hands and orientations come back, up to one element of it, and
+    the hand most of them have is called proper."""
+    count = 60
+    truth = random_rotations(rng, count)
+    flip = rng.random(count) < 0.3
+    truth = np.where(flip[:, None, None], -truth, truth)
+    left, right = build_pairs(count, 24, rng)
+    measured = truth[left] @ np.swapaxes(truth[right], -2, -1)
+    found = synchronize_rotations(
+        count, left, right, measured, np.ones(len(left)), improper=True
+    )
+    np.testing.assert_array_equal(np.linalg.det(found.orientations) < 0, flip)
+    # Up to one element of the group, which pairs never see.
+    pair = found.orientations[left] @ np.swapaxes(
+        found.orientations[right], -2, -1
+    )
+    np.testing.assert_allclose(pair, measured, atol=1e-6)
+
+
+def test_a_mirror_where_none_was_measured_is_as_wrong_as_can_be() -> None:
+    from frmony.symmetry import residual_angles
+
+    orientations = np.stack((np.eye(3), -np.eye(3)))
+    measured = np.eye(3)[None]
+    angles = residual_angles(
+        measured, np.array([0]), np.array([1]), orientations, np.eye(3)[None]
+    )
+    assert angles[0] == pytest.approx(np.pi)

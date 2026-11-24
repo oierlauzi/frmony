@@ -302,6 +302,11 @@ Do not claim otherwise in documentation or commit messages.
   10357 particles of a band of 38 held at once on a 32 GB device, at
   about half a millisecond a pair.
 
+- `frmony align` and `--mirrors` are held to phantoms only. On the first
+  test, with three of ten particles mirrored, every mirror was found. On
+  real data neither has been run, and nothing reads `frmonyMirrored` but
+  this package.
+
 ## Style
 
 Eighty columns, single quotes, Google style docstrings, `mypy --strict`.

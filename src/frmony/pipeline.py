@@ -83,6 +83,12 @@ class Design(Search):
     """Report the symmetry the measurements suggest, whatever was asked
     for."""
 
+    average: bool = True
+    """Average the particles over the band analysed, once they are
+    aligned, and say how far its halves agree. A caller that averages them
+    otherwise, as the command line does at the size they were extracted
+    at, has no use for it."""
+
     def __post_init__(self) -> None:
         super().__post_init__()
         if self.partners < 1:
@@ -117,17 +123,19 @@ class Result:
     """How far each pair ended up from agreeing [rad], modulo symmetry."""
     kept: NDArray[np.bool_]
     """Which pairs survived rejection."""
-    structure: NDArray[np.complex64]
-    """The average, as a centred spectrum."""
-    support: NDArray[np.float32]
+    structure: NDArray[np.complex64] | None
+    """The average over the band analysed, as a centred spectrum, if one
+    was asked for; see `Design.average`."""
+    support: NDArray[np.float32] | None
     """How much weight stands behind each of its frequencies."""
-    frequency: NDArray[np.float64]
+    frequency: NDArray[np.float64] | None
     """Shells of the resolution estimate, as fractions of the sampling
     rate."""
-    correlation: NDArray[np.float64]
+    correlation: NDArray[np.float64] | None
     """Shell correlation between two halves of the data."""
     resolution: float
-    """Where that correlation falls below 0.143 [A]."""
+    """Where that correlation falls below 0.143 [A], and not a number if
+    nothing was averaged."""
     detected: str = 'C1'
     """The point group the triangle residuals suggest. Only worth reading
     when `symmetry_doubted` is set: where nothing argues against the
@@ -165,6 +173,10 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
     """
     design = design or Design()
     count = len(subtomograms)
+    if count < 2:
+        raise ValueError(
+            f'Aligning pairs needs at least two particles, not {count}.'
+        )
     generator = np.random.default_rng(design.seed)
 
     left, right = build_pairs(count, design.partners, generator)
@@ -227,6 +239,7 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
                 if design.reject_above is None
                 else float(np.radians(design.reject_above))
             ),
+            improper=design.mirrors,
         )
         orientations = synchronized.orientations
         kept = synchronized.kept
@@ -259,20 +272,15 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
                 float(np.median(np.linalg.norm(centres, axis=1))),
             )
 
-    averaged = average_in_blocks(
-        count,
-        size,
-        spectra_on_device(data, weight, size),
-        orientations,
-        centres,
-    )
-    frequency, correlation = fourier_shell_correlation(*averaged.halves)
     # The band was cropped, so a shell's frequency is a fraction of the
     # cropped sampling rate; the pixel size that goes with it is coarser
     # than the one the particles were extracted at by the same factor.
     sampled = subtomograms.pixel_size * subtomograms.scale
-    resolution = resolution_at(frequency, correlation, sampled)
-    _report_resolution(resolution, 2.0 * sampled)
+    averaged = (
+        _average(count, size, data, weight, orientations, centres, sampled)
+        if design.average
+        else None
+    )
 
     return Result(
         orientations=orientations,
@@ -284,16 +292,54 @@ def run(subtomograms: Subtomograms, design: Design | None = None) -> Result:
         measured_shifts=measured_shifts,
         residuals=synchronized.residuals,
         kept=kept,
-        structure=averaged.structure,
-        support=averaged.support,
-        frequency=frequency,
-        correlation=correlation,
-        resolution=resolution,
+        structure=None if averaged is None else averaged.structure,
+        support=None if averaged is None else averaged.support,
+        frequency=None if averaged is None else averaged.frequency,
+        correlation=None if averaged is None else averaged.correlation,
+        resolution=float('nan') if averaged is None else averaged.resolution,
         detected=detected,
         scores_by_symmetry=by_symmetry,
         symmetry_doubted=doubted,
         confidence=_confidence(count, left, right, synchronized.inliers, held),
         band_limit=2.0 * sampled,
+    )
+
+
+@dataclass(frozen=True)
+class _Averaged:
+    structure: NDArray[np.complex64]
+    support: NDArray[np.float32]
+    frequency: NDArray[np.float64]
+    correlation: NDArray[np.float64]
+    resolution: float
+
+
+def _average(
+    count: int,
+    size: int,
+    data: NDArray[np.complex64],
+    weight: NDArray[np.float32],
+    orientations: NDArray[np.float64],
+    centres: NDArray[np.float64],
+    sampled: float,
+) -> _Averaged:
+    """The average over the band, and how far its halves agree."""
+    averaged = average_in_blocks(
+        count,
+        size,
+        spectra_on_device(data, weight, size),
+        orientations,
+        centres,
+    )
+    frequency, correlation = fourier_shell_correlation(*averaged.halves)
+    resolution = resolution_at(frequency, correlation, sampled)
+    _report_resolution(resolution, 2.0 * sampled)
+    return _Averaged(
+        structure=averaged.structure,
+        support=averaged.support,
+        frequency=frequency,
+        correlation=correlation,
+        resolution=resolution,
     )
 
 

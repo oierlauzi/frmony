@@ -33,6 +33,14 @@ The first run on real data, EMPIAR-10304.
 
 ### Changed
 
+- `frmony run` is now `frmony ab-initio`. The old name still works, with
+  a warning.
+- The search options shared by every aligning command are in
+  `engine.Search`, which `pipeline.Design` extends, and the expansions,
+  bases and aligner they build are in `engine.Engine`.
+- The command line does not average the particles over the band, which
+  it never wrote; `Design.average` turns that off.
+
 - With phases, the second stage finds the shift of the first stage's
   best rotation and no longer chooses among candidates.
 - `Design.batch` defaults to 8, which was measured, where 32 was
@@ -64,6 +72,15 @@ The first run on real data, EMPIAR-10304.
   the edge of the band analysed, which is given.
 
 ### Added
+
+- `frmony align`, and `reference.align_to_reference`: the particles
+  aligned one at a time to a clean reference, a block at a time like the
+  pairs.
+- `--mirrors`, and `Search.mirrors`: mirror images considered in the
+  alignment and synchronized over the orthogonal group. A mirrored
+  particle is written as the rotation it is minus, with `frmonyMirrored`.
+  Refused with `--no-phases`.
+- `--no-average`, in either command: the alignment alone.
 
 - `blocks`: particles that do not fit on the device are handed to it a
   block at a time, sized from what it has or from `--memory`. Pairs are

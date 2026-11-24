@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
-__all__ = ['write_map', 'write_spectrum']
+__all__ = ['read_pixel_size', 'write_map', 'write_spectrum']
 
 
 def write_map(
@@ -39,3 +39,12 @@ def write_spectrum(
         np.fft.ifftn(np.fft.ifftshift(np.asarray(spectrum)))
     ).real
     write_map(path, volume, pixel_size)
+
+
+def read_pixel_size(path: str | Path) -> float | None:
+    """The pixel size a map's header gives [A], if it gives one."""
+    import mrcfile
+
+    with mrcfile.open(str(path), permissive=True, header_only=True) as handle:
+        size = float(handle.voxel_size.x)
+    return size if size > 0.0 else None

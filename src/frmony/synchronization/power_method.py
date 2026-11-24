@@ -102,6 +102,7 @@ def synchronize(
     rank: int = 2 * _DIMENSION + 1,
     max_iterations: int = 512,
     tolerance: float = 1e-9,
+    improper: bool = False,
 ) -> tuple[NDArray[np.float64], int]:
     """Orientations that agree best with the measurements.
 
@@ -120,6 +121,9 @@ def synchronize(
             twice the dimension, is the relaxation of Burer and Monteiro.
         max_iterations: How many steps at most.
         tolerance: Stop when the objective gains less than this, relative.
+        improper: Solve over the orthogonal group, mirrors included,
+            rather than over rotations. The measurements may then be
+            mirrors too.
 
     Returns:
         The orientations ``(count, 3, 3)`` and how many steps were taken.
@@ -158,7 +162,7 @@ def synchronize(
         current[:, :, :_DIMENSION] = begun
 
     if len(left) == 0:
-        return collapse(current), 0
+        return collapse(current, improper), 0
 
     matrix = _block_matrix(count, left, right, measurements, weights)
     flat = current.reshape(_DIMENSION * count, rank)
@@ -177,10 +181,10 @@ def synchronize(
             _DIMENSION * count, rank
         )
 
-    return collapse(flat.reshape(count, _DIMENSION, rank)), iterations
+    return collapse(flat.reshape(count, _DIMENSION, rank), improper), iterations
 
 
-def collapse(lifted: ArrayLike) -> NDArray[np.float64]:
+def collapse(lifted: ArrayLike, improper: bool = False) -> NDArray[np.float64]:
     """Bring a lifted solution back to rotations.
 
     The lift leaves the answer spread over more columns than it needs, and
@@ -203,9 +207,12 @@ def collapse(lifted: ArrayLike) -> NDArray[np.float64]:
 
     Args:
         lifted: ``(count, 3, rank)``.
+        improper: Bring it back to orthogonal matrices of either
+            determinant, mirrors among them, rather than to rotations.
 
     Returns:
-        Rotations ``(count, 3, 3)``.
+        Rotations ``(count, 3, 3)``, or orthogonal matrices if
+        ``improper``.
     """
     stacked = np.asarray(lifted, dtype=np.float64)
     count = len(stacked)
@@ -216,6 +223,10 @@ def collapse(lifted: ArrayLike) -> NDArray[np.float64]:
     scale = 1.0 / np.sqrt(np.maximum(values[-_DIMENSION:], 1e-30))
     whitened = stacked @ (leading * scale)
 
+    if improper:
+        # Mirrors are answers too, so nothing is turned around, and each
+        # block is only made orthogonal.
+        return polar_rows(whitened)
     # Whitening is defined up to a reflection, and a reflected answer is a
     # mirror image of the structure. The measurements are rotations, so the
     # blocks all share one determinant; if it came out negative, turn one

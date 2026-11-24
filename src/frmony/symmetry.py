@@ -244,7 +244,10 @@ def residual_angles(
     angles: NDArray[np.float64] = np.arccos(
         np.clip(0.5 * (best - 1.0), -1.0, 1.0)
     )
-    return angles
+    # Where mirrors are allowed, a residual can be a mirror: the pair says
+    # one hand and the orientations the other. No angle describes that,
+    # and no rotation undoes it, so it is as wrong as a pair can be.
+    return np.where(np.linalg.det(common) < 0.0, np.pi, angles)
 
 
 def triangle_residuals(

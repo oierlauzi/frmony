@@ -487,3 +487,53 @@ def test_whitening_does_not_divide_by_next_to_nothing() -> None:
     assert np.all(np.isfinite(spectrum))
     assert np.abs(spectrum).max() <= 100.0
     np.testing.assert_allclose(np.abs(spectrum[1]), 50.0, rtol=1e-5)
+
+
+def test_a_mirror_is_written_as_the_rotation_it_is_minus(
+    tmp_path: Path,
+) -> None:
+    import pandas as pd
+    import starfile
+
+    from frmony.geometry import euler_to_matrix
+    from frmony.io.star import MIRRORED, Metadata
+
+    rotation = euler_to_matrix(0.3, 1.1, -0.7)
+    metadata = Metadata(
+        particles=pd.DataFrame({'rlnImageName': ['a.mrc', 'b.mrc']}),
+        optics=None,
+        data=['a.mrc', 'b.mrc'],
+        weights=None,
+        pixel_size=2.0,
+        version='relion5',
+    )
+    write_star(
+        tmp_path / 'out.star',
+        metadata,
+        np.stack((rotation, -rotation)),
+        np.zeros((2, 3)),
+    )
+    written = starfile.read(tmp_path / 'out.star')
+    angles = written[['rlnAngleRot', 'rlnAngleTilt', 'rlnAnglePsi']].to_numpy()
+    np.testing.assert_allclose(angles[0], angles[1])
+    np.testing.assert_array_equal(written[MIRRORED].to_numpy(), [0, 1])
+
+
+def test_no_mirror_column_unless_there_is_a_mirror(tmp_path: Path) -> None:
+    import pandas as pd
+    import starfile
+
+    from frmony.io.star import MIRRORED, Metadata
+
+    metadata = Metadata(
+        particles=pd.DataFrame({'rlnImageName': ['a.mrc']}),
+        optics=None,
+        data=['a.mrc'],
+        weights=None,
+        pixel_size=2.0,
+        version='relion5',
+    )
+    write_star(
+        tmp_path / 'out.star', metadata, np.eye(3)[None], np.zeros((1, 3))
+    )
+    assert MIRRORED not in starfile.read(tmp_path / 'out.star').columns

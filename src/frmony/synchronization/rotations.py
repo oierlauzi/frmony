@@ -289,6 +289,7 @@ def synchronize_rotations(
     reject_above: float | None = None,
     max_iterations: int = 512,
     robust: bool = True,
+    improper: bool = False,
 ) -> Synchronized:
     """Find the orientations the measurements agree on.
 
@@ -309,6 +310,9 @@ def synchronize_rotations(
         robust: Weigh each pair by the probability that it is right; see
             `inlier_probabilities`. Without it every pair kept counts by
             its weight alone.
+        improper: Solve over the orthogonal group, so that a particle can
+            come out as a mirror image of the rest. The measurements may
+            then be mirrors too.
 
     Returns:
         A `Synchronized`.
@@ -372,6 +376,7 @@ def synchronize_rotations(
             weights[using] * inliers[using],
             start=orientations,
             max_iterations=max_iterations,
+            improper=improper,
         )
         # The synchronization moved the global frame, so the group has
         # to be found again before the residuals are judged against it. A
@@ -422,6 +427,12 @@ def synchronize_rotations(
             if dropped == 0:
                 break
 
+    if improper and np.sum(np.linalg.det(orientations) < 0.0) > count / 2:
+        # The orientations are found up to one element of the orthogonal
+        # group, a mirror among them: inverting every one of them changes
+        # nothing that was measured. Of the two hands, the one most of the
+        # particles are in is the one called proper.
+        orientations = -orientations
     residuals = residual_angles(measurements, left, right, orientations, group)
     return Synchronized(
         orientations=orientations,

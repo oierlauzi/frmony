@@ -644,3 +644,68 @@ def test_a_displaced_pair_needs_its_shift_searched_too(
     assert np.median(errors[False]) > 45.0
     assert np.max(errors[True]) < 20.0
     assert np.max(misses) < 2.5
+
+
+# ------------------------------------------------------------------ mirrors
+
+
+def test_the_mirror_of_an_expansion_is_the_expansion_of_the_mirror(
+    rng: np.random.Generator,
+) -> None:
+    """Inverting a real volume conjugates its spectrum. `mirrored` makes
+    the expansions of that from the expansions of the particle, without
+    expanding anything again. Measured: within 1.4e-7."""
+    from frmony.matching.correlation import mirrored
+
+    data = (
+        rng.normal(size=(SIZE,) * 3) + 1j * rng.normal(size=(SIZE,) * 3)
+    ).astype(np.complex64)
+    weight = rng.uniform(size=(SIZE,) * 3).astype(np.float32)
+    basis = _basis()
+    made = mirrored(expand_particle(data, weight, basis, True))
+    direct = expand_particle(np.conj(data), weight, basis, True)
+    for found, wanted in zip(
+        (made.amplitude, made.energy, made.weight),
+        (direct.amplitude, direct.energy, direct.weight),
+        strict=True,
+    ):
+        scale = float(np.abs(np.asarray(wanted)).max())
+        np.testing.assert_allclose(
+            np.asarray(found), np.asarray(wanted), atol=1e-5 * scale
+        )
+
+
+def test_a_mirrored_pair_is_measured_as_a_mirror(
+    rng: np.random.Generator,
+) -> None:
+    """The second particle inverted through its centre. With mirrors the
+    pair comes back as minus the rotation between them, a matrix of
+    determinant minus one; without, it cannot."""
+    simulation = simulate(rng, 2, size=SIZE, tilt=60.0)
+    mirror = np.conj(simulation.data[1])
+    basis = _basis()
+    truth = -(simulation.rotations[0] @ simulation.rotations[1].T)
+    for mirrors in (True, False):
+        settings = Settings(
+            bandwidth=BANDWIDTH,
+            max_shift=1.0,
+            phases=True,
+            mirrors=mirrors,
+        )
+        found = align_pair(
+            simulation.data[0],
+            simulation.weight[0],
+            mirror,
+            simulation.weight[1],
+            expand_particle(
+                simulation.data[0], simulation.weight[0], basis, True
+            ),
+            expand_particle(mirror, simulation.weight[1], basis, True),
+            settings,
+        )
+        rotation = np.asarray(found.rotation)
+        if mirrors:
+            assert np.linalg.det(rotation) < 0.0
+            assert np.degrees(relative_angle(-rotation, -truth)) < 10.0
+        else:
+            assert np.linalg.det(rotation) > 0.0

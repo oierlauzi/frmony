@@ -225,13 +225,14 @@ def test_a_design_refuses_nonsense() -> None:
 
 def test_too_few_particles_is_refused(rng: np.random.Generator) -> None:
     simulation, _ = _subtomograms(rng, 2, size=16, tilt=60.0)
+    one = Subtomograms(
+        data=simulation.data[:1],
+        weight=simulation.weight[:1],
+        pixel_size=1.0,
+        box=16,
+    )
     with pytest.raises(ValueError, match='at least two'):
-        Subtomograms(
-            data=simulation.data[:1],
-            weight=simulation.weight[:1],
-            pixel_size=1.0,
-            box=16,
-        )
+        run(one)
 
 
 def test_mismatched_weights_are_refused(rng: np.random.Generator) -> None:
@@ -251,7 +252,8 @@ def test_mismatched_weights_are_refused(rng: np.random.Generator) -> None:
 def _relion_project(
     directory: Path, rng: np.random.Generator, count: int
 ) -> tuple[Path, np.ndarray]:
-    """A RELION extraction job, as it would be left on disk."""
+    """A RELION extraction job, as it would be left on disk, with the
+    structure it was simulated from beside it as ``reference.mrc``."""
     import pandas as pd
     import starfile
 
@@ -263,6 +265,7 @@ def _relion_project(
     half = np.fft.ifftshift(wedge)[:, :, : size // 2 + 1]
     stored = np.concatenate((half, np.ones_like(half)), axis=0)
 
+    write_map(directory / 'reference.mrc', simulation.structure, 4.0)
     names, weights = [], []
     for index in range(count):
         volume = np.fft.fftshift(
@@ -335,7 +338,7 @@ def test_the_command_line_runs(
     output = tmp_path / 'run'
     status = main(
         [
-            'run',
+            'ab-initio',
             str(path),
             str(output),
             '--partners',
@@ -594,6 +597,7 @@ def _uneven_project(
 
     simulation = simulate(rng, count, size=size, tilt=60.0)
     wedge = np.fft.ifftshift(wedge_mask(size, 60.0))[:, :, : size // 2 + 1]
+    write_map(directory / 'reference.mrc', simulation.structure, 4.0)
     names, weights = [], []
     for index in range(count):
         volume = np.fft.fftshift(
@@ -674,10 +678,91 @@ def test_the_command_line_writes_the_average_at_full_size(
 
     path, _ = _relion_project(tmp_path, rng, 12)
     output = tmp_path / 'run'
-    arguments = ['run', str(path), str(output), '--partners', '6']
+    arguments = ['ab-initio', str(path), str(output), '--partners', '6']
     arguments += ['--bandwidth', '12', '--candidates', '6', '--batch', '2']
     arguments += ['--max-shift', '2', '--band', '0.3']
     assert main(arguments) == 0
     with mrcfile.open(output / 'average.mrc') as written:
         assert written.data.shape == (24, 24, 24)
         assert float(written.voxel_size.x) == pytest.approx(4.0)
+
+
+# ------------------------------------------------------------ the commands
+
+
+def test_a_run_finds_the_mirror_images_among_the_particles(
+    rng: np.random.Generator,
+) -> None:
+    """Four of twelve particles inverted through their centres. With
+    mirrors they come back as mirrors and every pair agrees; measured,
+    1.1 degrees at the median and 2.4 at worst. Without, the pairs between
+    the two hands cannot agree."""
+    count = 12
+    simulation, subtomograms = _subtomograms(rng, count, size=32, tilt=60.0)
+    flip = np.zeros(count, dtype=bool)
+    flip[[1, 4, 7, 10]] = True
+    mixed = Subtomograms(
+        data=np.where(
+            flip[:, None, None, None],
+            np.conj(subtomograms.data),
+            subtomograms.data,
+        ),
+        weight=subtomograms.weight,
+        pixel_size=4.0,
+        box=32,
+    )
+    truth = np.where(
+        flip[:, None, None], -simulation.rotations, simulation.rotations
+    )
+    result = run(
+        mixed,
+        Design(partners=11, bandwidth=16, max_shift=1.0, mirrors=True),
+    )
+    mirrored = np.linalg.det(result.orientations) < 0.0
+    assert np.array_equal(mirrored, flip) or np.array_equal(mirrored, ~flip)
+    for i in range(count):
+        for j in range(i + 1, count):
+            found = result.orientations[i] @ result.orientations[j].T
+            wanted = truth[i] @ truth[j].T
+            assert np.linalg.det(found) * np.linalg.det(wanted) > 0.0
+            assert np.degrees(relative_angle(found, wanted)) < 10.0
+
+
+def test_the_command_line_aligns_to_a_reference(
+    tmp_path: Path, rng: np.random.Generator
+) -> None:
+    import starfile
+
+    from frmony.cli import main
+    from frmony.geometry import euler_to_matrix
+
+    path, rotations = _relion_project(tmp_path, rng, 8)
+    reference = tmp_path / 'reference.mrc'
+    output = tmp_path / 'aligned'
+    arguments = ['align', str(path), str(reference), str(output)]
+    arguments += ['--bandwidth', '12', '--max-shift', '2', '--no-average']
+    assert main(arguments) == 0
+
+    written = starfile.read(output / 'aligned.star', always_dict=True)
+    angles = written['particles'][
+        ['rlnAngleRot', 'rlnAngleTilt', 'rlnAnglePsi']
+    ].to_numpy()
+    found = euler_to_matrix(*np.radians(angles).T)
+    errors = np.degrees(relative_angle(found, rotations))
+    assert np.median(errors) < 15.0
+    # Asked for none, no average is made.
+    assert not (output / 'average.mrc').exists()
+
+
+def test_run_still_runs_and_says_what_it_is_now(
+    tmp_path: Path,
+    rng: np.random.Generator,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from frmony.cli import main
+
+    path, _ = _relion_project(tmp_path, rng, 6)
+    arguments = ['run', str(path), str(tmp_path / 'out'), '--partners', '5']
+    arguments += ['--bandwidth', '8', '--max-shift', '1', '--no-average']
+    assert main(arguments) == 0
+    assert "is now 'frmony ab-initio'" in caplog.text

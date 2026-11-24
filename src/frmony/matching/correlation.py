@@ -41,10 +41,11 @@ import jax.numpy as jnp
 from jax.typing import ArrayLike
 
 from .._transfers import to_device
+from ..harmonics.legendre import orders
 from ..harmonics.transform import Basis, expand
 from .rotation import correlation_grid, radial_overlap
 
-__all__ = ['Expansion', 'expand_particle', 'rotation_score']
+__all__ = ['Expansion', 'expand_particle', 'mirrored', 'rotation_score']
 
 
 @dataclass(frozen=True)
@@ -108,6 +109,32 @@ def expand_particle(
         amplitude=expand((data if phases else amplitude) * weight, basis),
         energy=expand(amplitude * amplitude * weight, basis),
         weight=expand(weight, basis),
+    )
+
+
+def mirrored(expansion: Expansion) -> Expansion:
+    """The expansions of a particle's mirror image, inverted through its
+    centre, made from its own.
+
+    Inverting a real volume conjugates its spectrum, ``D(k) -> conj(D(k))``,
+    and leaves its amplitudes and its weight alone, so only the numerator's
+    expansion changes. Expanding a conjugated function conjugates its
+    coefficients and swaps each order for its negative, with a sign:
+    ``c[l, m] -> (-1)**m conj(c[l, -m])``. That was checked against
+    expanding the conjugate directly, to within the rounding of single
+    precision. The order with no negative partner, the Nyquist column, is
+    empty in both.
+    """
+    bandwidth = expansion.amplitude.shape[-2]
+    ordered = to_device(orders(bandwidth))
+    negative = (-ordered) % (2 * bandwidth)
+    sign = jnp.where(ordered % 2 == 0, 1.0, -1.0).astype(
+        expansion.amplitude.dtype
+    )
+    return Expansion(
+        amplitude=sign * jnp.conjugate(expansion.amplitude[..., negative]),
+        energy=expansion.energy,
+        weight=expansion.weight,
     )
 
 

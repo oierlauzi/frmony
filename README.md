@@ -34,11 +34,17 @@ pip install 'frmony[cuda12]'
 
 ## Using it
 
+There are two commands. `frmony ab-initio` aligns the particles to one
+another, in pairs, and needs no reference. `frmony align` aligns each of
+them to a reference. They read the same inputs and take the same options
+for the search. `frmony run` is the old name of `ab-initio`, and still
+works.
+
 RELION three-dimensional pseudo-subtomograms, version 4 or 5. The two write
 the same files, and the version is detected rather than asked for.
 
 ```bash
-frmony run Extract/job006/particles.star run1/ --partners 150 \
+frmony ab-initio Extract/job006/particles.star run1/ --partners 150 \
     --mask-radius 16 --max-shift 4.5 --passes 3 --root . --verbose
 ```
 
@@ -62,7 +68,7 @@ to it a block at a time, which takes longer but gives the same result.
 Plain volumes, with the missing wedge given on the command line:
 
 ```bash
-frmony run subtomograms.txt run1/ --tilt 60 --pixel-size 4.2
+frmony ab-initio subtomograms.txt run1/ --tilt 60 --pixel-size 4.2
 ```
 
 Four files are written. `average.mrc` is the average, at the box and pixel
@@ -72,7 +78,32 @@ size the particles were extracted at, whatever band the alignment used.
 never saw the frequencies beyond its band, so from there on the halves
 could not have been made to agree by being aligned together, and the
 curve is fair. `synchronized.star` holds the orientations
-and centres, beside every column that came in.
+and centres, beside every column that came in. `--no-average` writes the
+orientations alone, and does not read the particles a second time.
+
+To a reference instead:
+
+```bash
+frmony align Extract/job006/particles.star reference.mrc aligned/ \
+    --mask-radius 16 --max-shift 4.5 --root .
+```
+
+The reference is one volume in the box of the particles, and is taken to
+be clean and measured everywhere. The particles may be anything the
+input holds: clean or noisy volumes, with a missing wedge or without, or
+pseudo-subtomograms. Each is aligned to the reference the way two
+particles are aligned to each other, so the result lands in its frame.
+`aligned.star` holds the orientations and the score of each, as
+`rlnMaxValueProbDistribution`, and the same average, support and
+correlation are written. Particles aligned to a reference come to look
+like it, so that correlation is biased towards it.
+
+`--mirrors`, in either command, also considers mirror images: a particle
+may come out as the mirror of the others, or of the reference. Its
+orientation is then minus a rotation. The STAR file has no way to say so,
+so the rotation is written and `frmonyMirrored` is set to one. It needs
+the phases, which tell a particle from its mirror; with `--no-phases` it
+is refused.
 
 The Python API exposes each stage on its own:
 

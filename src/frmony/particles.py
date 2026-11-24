@@ -32,6 +32,7 @@ from .io.wedge import cone_weight, relion_weight, wedge_weight
 
 __all__ = [
     'Subtomograms',
+    'load_reference',
     'load_subtomograms',
     'noise_spectra',
     'recentred',
@@ -108,11 +109,8 @@ class Subtomograms:
                 f'{len(self.data)} spectra of shape {self.data.shape[1:]} '
                 f'do not go with weights of shape {self.weight.shape[1:]}.'
             )
-        if len(self.data) < 2:
-            raise ValueError(
-                f'Aligning pairs needs at least two particles, not '
-                f'{len(self.data)}.'
-            )
+        if len(self.data) < 1:
+            raise ValueError('A set of subtomograms holds at least one.')
 
 
 def whiten(
@@ -425,6 +423,50 @@ def _recentre_stretch(
 
     moved: jax.Array = jax.lax.map(one, (data, weight, moves), batch_size=batch)
     return moved
+
+
+def load_reference(path: str, like: Subtomograms) -> Subtomograms:
+    """A clean volume, put in the form the particles it is to be compared
+    with were put in.
+
+    It is taken to have measured everything, with nothing lost to a wedge
+    or to a transfer, so its weight is one everywhere. It is cropped to the
+    same band and carries the same mask.
+
+    Args:
+        path: The volume, in a file of its own.
+        like: The particles it will be compared with.
+
+    Returns:
+        A set of one.
+
+    Raises:
+        ValueError: If it is not a cube the size of the particles' box.
+    """
+    from .io.maps import read_pixel_size
+
+    volume = _read_volume(path)
+    if volume.shape != (like.box,) * 3:
+        raise ValueError(
+            f'The reference {path} is {volume.shape}, and the particles are '
+            f'{(like.box,) * 3}. Resample it to their box first.'
+        )
+    stated = read_pixel_size(path) if path.lower().endswith('.mrc') else None
+    if stated is not None and abs(stated - like.pixel_size) > 0.01 * stated:
+        _LOGGER.warning(
+            'The reference says its pixels are %.3f A and the particles '
+            'say %.3f A. It is compared with them voxel for voxel.',
+            stated,
+            like.pixel_size,
+        )
+    spectrum, weight = prepare(volume, np.ones_like(volume), crop=like.band)
+    return Subtomograms(
+        data=spectrum[None],
+        weight=weight[None],
+        pixel_size=like.pixel_size,
+        box=like.box,
+        mask_radius=like.mask_radius,
+    )
 
 
 def recentred(

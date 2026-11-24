@@ -32,7 +32,11 @@ import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
-__all__ = ['Metadata', 'read_star', 'write_star']
+__all__ = ['MIRRORED', 'Metadata', 'read_star', 'write_star']
+
+MIRRORED = 'frmonyMirrored'
+"""The column that marks a particle found to be a mirror image: one where
+it is, written beside the angles of the rotation it is minus."""
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -214,7 +218,8 @@ def write_star(
     Args:
         path: Where to write.
         metadata: What `read_star` returned.
-        rotations: Orientations ``(particles, 3, 3)``.
+        rotations: Orientations ``(particles, 3, 3)``, mirrors among them
+            if a search allowed them; see `MIRRORED`.
         shifts: Centres ``(particles, 3)`` in voxels, ordered
             ``(x, y, z)``.
         scores: A figure of merit for each particle, written as
@@ -230,13 +235,22 @@ def write_star(
         raise ValueError('There must be one centre for each particle.')
 
     particles = metadata.particles.copy()
-    rot, tilt, psi = matrix_to_euler(rotations)
+    # Euler angles describe rotations only. A particle found to be a
+    # mirror image has an orientation of determinant minus one, minus a
+    # rotation; that rotation is written, and the mirror said apart, in a
+    # column of this package's own, which RELION does not know.
+    mirror = np.linalg.det(rotations) < 0.0
+    rot, tilt, psi = matrix_to_euler(
+        np.where(mirror[:, None, None], -rotations, rotations)
+    )
     for column, values in zip(_ANGLES, (rot, tilt, psi), strict=True):
         particles[column] = np.degrees(values)
     for column, axis in zip(_ORIGINS, range(3), strict=True):
         particles[column] = shifts[:, axis] * metadata.pixel_size
     if scores is not None:
         particles['rlnMaxValueProbDistribution'] = np.asarray(scores)
+    if np.any(mirror):
+        particles[MIRRORED] = mirror.astype(np.int64)
 
     blocks: dict[str, pd.DataFrame] = {}
     if metadata.optics is not None:

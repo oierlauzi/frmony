@@ -96,9 +96,24 @@ class Search:
     has. Particles that do not fit are handed to it a block at a time;
     see `frmony.blocks`."""
 
+    mirrors: bool = False
+    """Also consider mirror images: a particle may come out as the mirror
+    image of the others, or of the reference, inverted through its
+    centre. Its orientation is then an orthogonal matrix of determinant
+    minus one. Off by default, since a mirror is not a physical
+    possibility for a chiral particle; worth asking for when the input
+    may have been flipped, or the particle has a mirror plane. It needs
+    `phases`: a particle and its mirror have the same amplitudes."""
+
     def __post_init__(self) -> None:
         if not 0.0 <= self.lowest < 0.5:
             raise ValueError('The innermost sphere is inside the box.')
+        if self.mirrors and not self.phases:
+            raise ValueError(
+                'Mirrors need the phases: a particle and its mirror image '
+                'have the same amplitudes, so a search on amplitudes alone '
+                'cannot tell them apart. Drop --no-phases or --mirrors.'
+            )
 
 
 @dataclass(frozen=True)
@@ -150,6 +165,7 @@ class Engine:
                 candidates=search.candidates,
                 max_shift=search.max_shift,
                 phases=search.phases,
+                mirrors=search.mirrors,
             ),
             shells=len(radii),
             spacing=lattice_spacing(extent, float(radii[-1])),

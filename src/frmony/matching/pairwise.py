@@ -31,7 +31,7 @@ from .._progress import progress
 from .._transfers import to_device
 from ..harmonics.shells import sample_shells
 from ..harmonics.transform import Basis, expand_shells
-from .correlation import Expansion, rotation_score
+from .correlation import Expansion, mirrored, rotation_score
 from .peaks import refine_peak, top_peaks
 from .rotation import correlation_grid, radial_overlap
 from .translation import frequency_grid, shift_correlation
@@ -78,6 +78,15 @@ class Settings:
     outranks. With phases it is the poorer judge: it turns the second
     particle by interpolating its spectrum, and on EMPIAR-10304 letting
     it choose took the pairs aligned from 40 in a hundred to 29."""
+    mirrors: bool = False
+    """Also try the second particle's mirror image, inverted through its
+    centre, and keep whichever matches better. The rotation that comes
+    back is then the orthogonal matrix of the pair, a mirror if the
+    mirror won: minus the rotation that matched it.
+
+    Amplitudes cannot tell a particle from its mirror, which has the same
+    ones, so it is meant to go with `phases`; `frmony.engine.Search`
+    refuses it without."""
 
     def __post_init__(self) -> None:
         if self.bandwidth < 2:
@@ -438,8 +447,56 @@ def align_pair(
             within `Settings.max_shift` of nothing.
 
     Returns:
-        The best rotation, shift and score found.
+        The best rotation, shift and score found. With
+        `Settings.mirrors`, the rotation is an orthogonal matrix that may
+        be a mirror; see there.
     """
+    found = _search_pair(
+        left_data,
+        left_weight,
+        right_data,
+        right_weight,
+        left,
+        right,
+        settings,
+        band,
+        joint,
+    )
+    if not settings.mirrors:
+        return found
+    # The mirror image of the second particle: its spectrum conjugated,
+    # its weight the same, its expansions as `mirrored` makes them.
+    reflected = _search_pair(
+        left_data,
+        left_weight,
+        jnp.conjugate(to_device(right_data)),
+        right_weight,
+        left,
+        mirrored(right),
+        settings,
+        band,
+        joint,
+    )
+    better = reflected.score > found.score
+    return Alignment(
+        rotation=jnp.where(better, -reflected.rotation, found.rotation),
+        shift=jnp.where(better, reflected.shift, found.shift),
+        score=jnp.maximum(reflected.score, found.score),
+    )
+
+
+def _search_pair(
+    left_data: ArrayLike,
+    left_weight: ArrayLike,
+    right_data: ArrayLike,
+    right_weight: ArrayLike,
+    left: Expansion,
+    right: Expansion,
+    settings: Settings,
+    band: ArrayLike | None,
+    joint: Joint | None,
+) -> Alignment:
+    """`align_pair` for the particles as they are, mirrors aside."""
     left_data = to_device(left_data)
     size = left_data.shape[-1]
     grid = to_device(frequency_grid(size))

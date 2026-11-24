@@ -36,6 +36,7 @@ from .matching.translation import frequency_grid
 __all__ = [
     'Aligned',
     'BlockedAverage',
+    'align_against',
     'align_in_blocks',
     'average_in_blocks',
     'block_size',
@@ -240,6 +241,68 @@ def align_in_blocks(
             # Waited on, or the bar would only say how much was dispatched.
             piece.score.block_until_ready()
             taken = chosen[start : start + chunk]
+            kept = len(taken)
+            rotations[taken] = to_host(piece.rotation)[:kept]
+            shifts[taken] = to_host(piece.shift)[:kept]
+            scores[taken] = to_host(piece.score)[:kept]
+            bar.update(1)
+    bar.close()
+    return Aligned(rotation=rotations, shift=shifts, score=scores)
+
+
+def align_against(
+    fixed: Particles,
+    count: int,
+    size: int,
+    make: Callable[[int, int], Particles],
+    align: Callable[[Particles, Particles, jax.Array], Alignment],
+    batch: int,
+) -> Aligned:
+    """Align every particle against one particle that stays on the device.
+
+    Each pair is the fixed particle, first, and one of the others, second,
+    as `align_in_blocks` would see the pair. The others come a block at a
+    time, the next on its way while the current one is worked on.
+
+    Args:
+        fixed: The particle everything is aligned against, a set of one.
+        count: How many others there are.
+        size: How many of them a block holds; see `block_size`.
+        make: Given a first and one past a last index, those particles on
+            the device, ``size`` of them, padded at the end if fewer.
+        align: `frmony.matching.pairwise.align_chunk` with everything but
+            the two sets and the pairs given.
+        batch: Pairs aligned at once, which chunks are a whole number of.
+
+    Returns:
+        An `Aligned`, one pair for each of the others, in their order.
+    """
+    ranges = _blocks(count, size)
+    chunk = chunk_of(count, batch)
+    rotations = np.zeros((count, 3, 3), dtype=np.float32)
+    shifts = np.zeros((count, 3), dtype=np.float32)
+    scores = np.zeros(count, dtype=np.float32)
+    chunks = sum(-(-(stop - start) // chunk) for start, stop in ranges)
+    bar = progress(
+        range(chunks), 'Aligning particles', unit='particle', scale=chunk
+    )
+    pending = make(*ranges[0])
+    for number, (start, stop) in enumerate(ranges):
+        block = pending
+        if number + 1 < len(ranges):
+            pending = make(*ranges[number + 1])
+        # The fixed particle is the first set, of one; the block follows.
+        local = np.stack(
+            (np.zeros(stop - start), 1 + np.arange(stop - start)), axis=1
+        ).astype(np.int32)
+        padding = -len(local) % chunk
+        local = np.concatenate((local, np.repeat(local[-1:], padding, axis=0)))
+        for offset in range(0, len(local), chunk):
+            piece = align(
+                fixed, block, to_device(local[offset : offset + chunk])
+            )
+            piece.score.block_until_ready()
+            taken = np.arange(start + offset, min(start + offset + chunk, stop))
             kept = len(taken)
             rotations[taken] = to_host(piece.rotation)[:kept]
             shifts[taken] = to_host(piece.shift)[:kept]
