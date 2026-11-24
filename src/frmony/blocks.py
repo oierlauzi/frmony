@@ -42,6 +42,7 @@ __all__ = [
     'device_memory',
     'pad_to',
     'per_particle',
+    'spectra_on_device',
 ]
 
 _LOGGER = logging.getLogger(__name__)
@@ -328,6 +329,21 @@ def average_in_blocks(
             to_host(ratio(top[1], bottom[1])),
         ),
     )
+
+
+def spectra_on_device(
+    data: NDArray[np.complex64], weight: NDArray[np.float32], size: int
+) -> Callable[[int, int], tuple[jax.Array, jax.Array]]:
+    """What hands a block of spectra and weights to the device, to average,
+    padded to ``size`` with nothing."""
+
+    def make(start: int, stop: int) -> tuple[jax.Array, jax.Array]:
+        return (
+            to_device(pad_to(data[start:stop], size)),
+            to_device(pad_to(weight[start:stop], size)),
+        )
+
+    return make
 
 
 def pad_to(values: NDArray[np.generic], size: int) -> NDArray[np.generic]:
